@@ -10,6 +10,7 @@ env:
   GCP_REGION: us-east1
   GCP_ZONE: us-east1-b
   IMAGE_NAME: fe-dev
+  REGISTRY: us-east1-docker.pkg.dev
 
 jobs:
   build-and-deploy:
@@ -46,25 +47,25 @@ jobs:
 
       - name: Set image name
         id: set-image
-        run: echo "image=gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+        run: echo "image=${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
 
       - name: Build Docker image
         run: |
-          docker build -t gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }} -f fe/Dockerfile fe/
+          docker build -t ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} -f fe/Dockerfile fe/
 
       - name: Push to Artifact Registry
         run: |
-          gcloud auth configure-docker
-          docker push gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
+          gcloud auth configure-docker ${{ env.REGISTRY }}
+          docker push ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}
 
       - name: Deploy to Dev Server
         run: |
           gcloud compute ssh ${{ secrets.DEV_INSTANCE_NAME }} \
             --zone=${{ env.GCP_ZONE }} \
-            --command="docker pull gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }} && \
+            --command="docker pull ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} && \
                        docker stop ${{ env.IMAGE_NAME }} || true && \
                        docker rm ${{ env.IMAGE_NAME }} || true && \
-                       docker run -d --name ${{ env.IMAGE_NAME }} -p 80:80 gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+                       docker run -d --name ${{ env.IMAGE_NAME }} -p 80:80 ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
 
   notify-success:
     needs: build-and-deploy
