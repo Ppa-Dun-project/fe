@@ -62,7 +62,8 @@ jobs:
         run: |
           gcloud compute ssh ${{ secrets.DEV_INSTANCE_NAME }} \
             --zone=${{ env.GCP_ZONE }} \
-            --command="sudo docker pull ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} && \
+            --command="sudo gcloud auth configure-docker ${{ env.REGISTRY }} --quiet && \
+                       sudo docker pull ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }} && \
                        sudo docker stop ${{ env.IMAGE_NAME }} || true && \
                        sudo docker rm ${{ env.IMAGE_NAME }} || true && \
                        sudo docker run -d --name ${{ env.IMAGE_NAME }} -p 80:80 ${{ env.REGISTRY }}/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
