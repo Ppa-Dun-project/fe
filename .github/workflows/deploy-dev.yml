@@ -14,6 +14,8 @@ env:
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.set-image.outputs.image }}
 
     steps:
       - name: Checkout code
@@ -42,6 +44,10 @@ jobs:
       - name: Set up Cloud SDK
         uses: google-github-actions/setup-gcloud@v2
 
+      - name: Set image name
+        id: set-image
+        run: echo "image=gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
       - name: Build Docker image
         run: |
           docker build -t gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }} -f fe/Dockerfile fe/
@@ -59,3 +65,24 @@ jobs:
                        docker stop ${{ env.IMAGE_NAME }} || true && \
                        docker rm ${{ env.IMAGE_NAME }} || true && \
                        docker run -d --name ${{ env.IMAGE_NAME }} -p 80:80 gcr.io/${{ env.GCP_PROJECT_ID }}/${{ env.IMAGE_NAME }}:${{ github.sha }}"
+
+  notify-success:
+    needs: build-and-deploy
+    if: success()
+    uses: ./.github/workflows/discord-deploy-notify.yml
+    with:
+      status: 'success'
+      service: 'Frontend'
+      image: ${{ needs.build-and-deploy.outputs.image }}
+    secrets:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+
+  notify-failure:
+    needs: build-and-deploy
+    if: failure()
+    uses: ./.github/workflows/discord-deploy-notify.yml
+    with:
+      status: 'failure'
+      service: 'Frontend'
+    secrets:
+      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
