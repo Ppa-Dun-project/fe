@@ -75,7 +75,7 @@ jobs:
       service: 'Frontend'
       image: ${{ needs.build-and-deploy.outputs.image }}
     secrets:
-      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      DISCORD_DEPLOY_WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}
 
   notify-failure:
     needs: build-and-deploy
@@ -85,4 +85,4 @@ jobs:
       status: 'failure'
       service: 'Frontend'
     secrets:
-      DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+      DISCORD_DEPLOY_WEBHOOK: ${{ secrets.DISCORD_DEPLOY_WEBHOOK }}

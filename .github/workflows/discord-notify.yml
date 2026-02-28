@@ -12,7 +12,7 @@ jobs:
     steps:
       - name: Send Discord Notification
         env:
-          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_ISSUE_TRACKER }}
           EVENT_NAME: ${{ github.event_name }}
           ACTION: ${{ github.event.action }}
           REPO: ${{ github.repository }}
