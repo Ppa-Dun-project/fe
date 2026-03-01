@@ -1,12 +1,16 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
+
 import FadeIn from "../components/ui/FadeIn";
 import Modal from "../components/ui/Modal";
 import Skeleton from "../components/ui/Skeleton";
+
 import type { NewsItem } from "../types/home";
 import NewsCard from "../features/home/NewsCard";
-import TopPlayerCard from "../features/home/TopPlayerCard";
-import { mockNews, mockTopPlayers } from "../features/home/mock";
+import { mockNews } from "../features/home/mock";
+
+import DraftSetupCard from "../features/home/DraftSetupCard";
+
 import baseballImg from "../assets/Baseball.jpg";
 
 export default function HomePage() {
@@ -15,9 +19,6 @@ export default function HomePage() {
   const [newsLoading] = useState(false);
   const [newsError] = useState<string | null>(null);
   const news = useMemo(() => mockNews, []);
-
-  const [topLoading] = useState(false);
-  const topPlayers = useMemo(() => mockTopPlayers.slice(0, 4), []);
 
   const [query, setQuery] = useState("");
   const [selected, setSelected] = useState<NewsItem | null>(null);
@@ -33,32 +34,28 @@ export default function HomePage() {
       {/* Hero */}
       <FadeIn>
         <section className="relative overflow-hidden rounded-3xl border border-white/10 bg-black p-6 md:p-10">
-          {/* ✅ Background image layer */}
+          {/* Background image layer */}
           <div className="absolute inset-0">
             <img
               src={baseballImg}
               alt="Baseball background"
-              // ✅ 밝기/채도 업 + scale 유지
               className="h-full w-full object-cover object-right origin-right scale-80 brightness-135 saturate-110"
             />
-            {/* ✅ Dark overlay (조금 완화) */}
             <div className="absolute inset-0 bg-gradient-to-r from-black via-black/70 to-black/20" />
-            {/* ✅ Subtle vignette (조금 완화) */}
             <div className="absolute inset-0 shadow-[inset_0_0_120px_rgba(0,0,0,0.75)]" />
           </div>
 
-          {/* ✅ Content layer */}
+          {/* Content layer */}
           <div className="relative z-10 flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
             <div>
               <div className="inline-flex items-center gap-2 rounded-full border border-white/10 bg-black/40 px-3 py-1 text-xs text-white/70">
-                BLACK THEME • PPA-Dun
+              • PPA-Dun Project - TEAM BLACK
               </div>
               <h1 className="mt-4 text-3xl font-extrabold tracking-tight text-white md:text-5xl">
-                Build your roster with explainable ValueScores.
+                Build your roster with the Best Players.
               </h1>
               <p className="mt-3 max-w-2xl text-sm text-white/70 md:text-base">
-                Check the latest news, scout top players, and jump straight into search.
-                Keep it clean. Keep it Black.
+                Check the latest news, scout top players for your Fantasy.
               </p>
             </div>
 
@@ -76,12 +73,12 @@ export default function HomePage() {
                 />
                 <button
                   onClick={onSearch}
-                    className="rounded-xl bg-black/80 px-4 py-2 text-sm font-extrabold text-white
-                              ring-1 ring-white/25
-                              shadow-[0_10px_30px_rgba(255,255,255,0.12)]
-                              transition
-                              hover:translate-y-[-1px] hover:bg-black/70 hover:ring-white/40
-                              active:translate-y-0"
+                  className="rounded-xl bg-black/80 px-4 py-2 text-sm font-extrabold text-white
+                             ring-1 ring-white/25
+                             shadow-[0_10px_30px_rgba(255,255,255,0.12)]
+                             transition
+                             hover:translate-y-[-1px] hover:bg-black/70 hover:ring-white/40
+                             active:translate-y-0"
                 >
                   Search
                 </button>
@@ -92,7 +89,7 @@ export default function HomePage() {
         </section>
       </FadeIn>
 
-      {/* Grid: News + Top Players */}
+      {/* Grid: News + Draft Setup */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
         {/* Latest News */}
         <FadeIn className="lg:col-span-2" delayMs={60}>
@@ -134,42 +131,15 @@ export default function HomePage() {
               )}
 
               {!newsLoading && !newsError && news.map((item) => (
-                <NewsCard
-                  key={item.id}
-                  item={item}
-                  onClick={() => setSelected(item)}
-                />
+                <NewsCard key={item.id} item={item} onClick={() => setSelected(item)} />
               ))}
             </div>
           </section>
         </FadeIn>
 
-        {/* Top Players */}
+        {/* Draft Setup (replaces Top Players box) */}
         <FadeIn className="lg:col-span-1" delayMs={120}>
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-            <h2 className="text-lg font-bold text-white">Top Players</h2>
-            <p className="mt-1 text-sm text-white/60">
-              Highest ValueScore right now.
-            </p>
-
-            <div className="mt-5 space-y-3">
-              {topLoading ? (
-                <>
-                  <Skeleton className="h-16" />
-                  <Skeleton className="h-16" />
-                  <Skeleton className="h-16" />
-                </>
-              ) : (
-                topPlayers.map((p) => (
-                  <TopPlayerCard
-                    key={p.id}
-                    player={p}
-                    onClick={() => navigate(`/players/${p.id}`)}
-                  />
-                ))
-              )}
-            </div>
-          </section>
+          <DraftSetupCard />
         </FadeIn>
       </div>
 
