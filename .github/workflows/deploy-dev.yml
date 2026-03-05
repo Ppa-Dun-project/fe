@@ -41,6 +41,9 @@ jobs:
 
       - name: Deploy to Dev Server
         run: |
+          gcloud compute ssh ${{ secrets.DEV_INSTANCE_NAME }} \
+            --zone=${{ env.GCP_ZONE }} \
+            --command="sudo mkdir -p /app/fe/dist"
           gcloud compute scp --recurse fe/dist/* \
             ${{ secrets.DEV_INSTANCE_NAME }}:/app/fe/dist/ \
             --zone=${{ env.GCP_ZONE }}
