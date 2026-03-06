@@ -185,7 +185,7 @@ export default function MyTeamPage() {
           </div>
 
           <div className="mt-3 text-xs text-white/45">
-            TODO(백엔드/DB): 이 표의 선수/스탯/비딩 가격은 Draft 결과를 기반으로 서버에서 내려줘야 합니다.
+            TODO(백엔드): 선수 스탯,가격 값 서버에서 넣어주기
           </div>
         </section>
       </FadeIn>
