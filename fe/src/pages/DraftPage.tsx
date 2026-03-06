@@ -1,22 +1,45 @@
-import { useMemo, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 
 import FadeIn from "../components/ui/FadeIn";
 import Skeleton from "../components/ui/Skeleton";
 
-import type { PlayerSort } from "../types/player";
-import { mockPlayers } from "../features/players/mock";
+import type { Player, PlayerSort } from "../types/player";
 import type { PositionFilter } from "../features/players/mock";
-import { filterPlayers, paginate, sortPlayers } from "../features/players/utils";
 
 import PlayersToolbar from "../features/players/components/PlayersToolbar";
 import PlayerCard from "../features/players/components/PlayerCard";
 import Pagination from "../features/players/components/Pagination";
-import TopPlayersPanel from "../features/players/components/TopPlayersPanel";
 import DraftSummaryBadge from "../features/players/components/DraftSummaryBadge";
 
 function getParam(params: URLSearchParams, key: string, fallback: string) {
   return params.get(key) ?? fallback;
+}
+
+
+
+
+// [CHANGED] Backend base URL for players API connection.
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+
+type PlayersListResponse = {
+  items: Player[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+};
+
+// 백엔드에 선수 목록 요청 보내는 함수
+async function requestPlayers(
+  params: URLSearchParams,
+  signal: AbortSignal,
+): Promise<PlayersListResponse> {
+  const res = await fetch(`${API_BASE_URL}/api/players?${params.toString()}`, { signal });
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status}`);
+  }
+  return (await res.json()) as PlayersListResponse;
 }
 
 export default function DraftPage() {
@@ -32,6 +55,14 @@ export default function DraftPage() {
 
   // local UI state: typing buffer
   const [draftQuery, setDraftQuery] = useState(query);
+
+  // 백엔드에서 받아온 목록 데이터.
+  const [items, setItems] = useState<Player[]>([]);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(0);
+  const [safePage, setSafePage] = useState(page);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const onSubmitSearch = () => {
     const next = new URLSearchParams(params);
@@ -65,25 +96,56 @@ export default function DraftPage() {
     setParams(new URLSearchParams(), { replace: true });
   };
 
-  // MVP: mock loading simulation switch (enable if needed)
-  const loading = false;
-  // TODO (Backend/API): replace with real error handling from API responses
-  const error: string | null = null;
+  // URL의 query 값이 바뀌면, search 박스 안의 글자도 똑같이 바껴야 됨.
+  useEffect(() => {
+    setDraftQuery(query);
+  }, [query]);
 
-  const filtered = useMemo(() => {
-    // TODO (Backend/API): replace mockPlayers with API results
-    // e.g. GET /api/players?query=&position=&sort=&page=
-    const f = filterPlayers(mockPlayers, query, position);
-    return sortPlayers(f, sort);
-  }, [query, position, sort]);
+  // 검색어, 포지션, 정렬, 페이지가 바뀔 때마다 서버에 다시 요청해서 선수 목록을 받아오는 코드.
+  useEffect(() => {
+    const controller = new AbortController();
 
-  const { items, total, totalPages, page: safePage } = useMemo(() => {
-    return paginate(filtered, page, pageSize);
-  }, [filtered, page]);
+    const requestParams = new URLSearchParams();
+    if (query.trim()) {
+      requestParams.set("query", query.trim());
+    }
+    if (position !== "ALL") {
+      requestParams.set("position", position);
+    }
+    requestParams.set("sort", sort);
+    requestParams.set("page", String(page));
+    requestParams.set("limit", String(pageSize));
 
-  const topPlayers = useMemo(() => {
-    return sortPlayers(mockPlayers, "value_desc");
-  }, []);
+    setLoading(true);
+    setError(null);
+
+    requestPlayers(requestParams, controller.signal)
+      .then((data) => {
+        setItems(data.items);
+        setTotal(data.total);
+        setTotalPages(data.totalPages);
+        setSafePage(data.page);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") {
+          return;
+        }
+
+        setItems([]);
+        setTotal(0);
+        setTotalPages(0);
+        setSafePage(1);
+        setError(err instanceof Error ? err.message : "Unknown error");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [query, position, sort, page]);
+  // 위 4개 중 하나라도 바뀌면 이 함수는 다시 실행됨.
 
   return (
     <div className="space-y-6">
@@ -116,9 +178,8 @@ export default function DraftPage() {
         />
       </FadeIn>
 
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* List */}
-        <FadeIn className="lg:col-span-2" delayMs={120}>
+      <div className="grid grid-cols-1 gap-6">
+        <FadeIn delayMs={120}>
           <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
             <div className="flex items-end justify-between gap-3">
               <div>
@@ -171,11 +232,6 @@ export default function DraftPage() {
               <Pagination page={safePage} totalPages={totalPages} onChange={onChangePage} />
             )}
           </section>
-        </FadeIn>
-
-        {/* Side panel: Top Players */}
-        <FadeIn className="lg:col-span-1" delayMs={180}>
-          <TopPlayersPanel players={topPlayers} />
         </FadeIn>
       </div>
     </div>
