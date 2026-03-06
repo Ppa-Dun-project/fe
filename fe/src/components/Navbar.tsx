@@ -13,7 +13,7 @@ function navItemClass(isActive: boolean) {
 export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
-  const authed = useAuth(); // ✅ reactive
+  const authed = useAuth();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const redirectToLogin = () => {
@@ -34,6 +34,7 @@ export default function Navbar() {
     <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-black/60 backdrop-blur">
       <div className="mx-auto w-full max-w-[1400px] px-8 py-3">
         <div className="flex items-center justify-between">
+          {/* Brand */}
           <button
             onClick={() => {
               setDrawerOpen(false);
@@ -48,6 +49,7 @@ export default function Navbar() {
             </span>
           </button>
 
+          {/* Desktop nav */}
           <nav className="hidden items-center gap-2 md:flex">
             {menu.map((item) => (
               <NavLink
@@ -66,6 +68,7 @@ export default function Navbar() {
             ))}
           </nav>
 
+          {/* Right actions */}
           <div className="hidden items-center gap-3 md:flex">
             {!authed ? (
               <button
@@ -81,7 +84,7 @@ export default function Navbar() {
             ) : (
               <button
                 onClick={() => {
-                  doLogout(); // ✅ triggers emit -> UI updates immediately
+                  doLogout();
                   navigate("/", { replace: true });
                 }}
                 className="
@@ -95,6 +98,7 @@ export default function Navbar() {
             )}
           </div>
 
+          {/* Mobile hamburger */}
           <button
             className="md:hidden rounded-2xl border border-white/10 px-3 py-2 text-white/90 hover:bg-white/5 transition"
             onClick={() => setDrawerOpen(true)}
@@ -105,6 +109,7 @@ export default function Navbar() {
         </div>
       </div>
 
+      {/* Mobile drawer */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
           <button className="absolute inset-0 bg-black/70" onClick={() => setDrawerOpen(false)} />

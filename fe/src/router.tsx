@@ -7,7 +7,6 @@ import DraftPage from "./pages/DraftPage";
 import PlayerDetailPage from "./pages/PlayerDetailPage";
 import LoginPage from "./pages/LoginPage";
 import MyTeamPage from "./pages/MyTeamPage";
-import SettingsPage from "./pages/SettingsPage";
 
 export const router = createBrowserRouter([
   {
@@ -16,11 +15,11 @@ export const router = createBrowserRouter([
     children: [
       { index: true, element: <HomePage /> },
 
-      // ✅ Draft is the main list page now
+      // Draft
       { path: "draft", element: <DraftPage /> },
       { path: "draft/:id", element: <PlayerDetailPage /> },
 
-      // ✅ Backward compatibility (so old links still work)
+      // Backward compatibility
       { path: "players", element: <Navigate to="/draft" replace /> },
       { path: "players/:id", element: <Navigate to="/draft/:id" replace /> },
 
@@ -31,9 +30,11 @@ export const router = createBrowserRouter([
         element: <ProtectedRoute />,
         children: [
           { path: "my-team", element: <MyTeamPage /> },
-          { path: "settings", element: <SettingsPage /> },
         ],
       },
+
+      // ✅ Settings 제거했으므로, 혹시 들어오면 my-team으로 보내기(선택)
+      { path: "settings", element: <Navigate to="/my-team" replace /> },
     ],
   },
 ]);
