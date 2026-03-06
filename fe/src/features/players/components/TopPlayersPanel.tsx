@@ -19,7 +19,7 @@ export default function TopPlayersPanel({ players }: Props) {
           <TopPlayerCard
             key={p.id}
             player={{
-              id: p.id,
+              id: String(p.id),
               name: p.name,
               team: p.team,
               positions: p.positions,

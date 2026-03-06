@@ -1,5 +1,5 @@
 export type Player = {
-  id: string;
+  id: number;
   name: string;
   team: string;
   positions: string[]; // e.g. ["OF"], ["2B","OF"], ["P"]
