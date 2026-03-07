@@ -7,17 +7,6 @@ import type { MyTeamPlayer, MyTeamPosFilter, MyTeamSort } from "../types/myteam"
 import { formatAvg, teamBadgeClass, valueScoreClass } from "../features/myteam/utils";
 import { apiGet } from "../lib/api";
 
-type MyTeamPlayersResponse = {
-  items: MyTeamPlayer[];
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-  totalBudget: number;
-  spentBudget: number;
-  remainingBudget: number;
-};
-
 type MyTeamPositionsResponse = {
   positions: MyTeamPosFilter[];
 };
@@ -89,9 +78,11 @@ function normalizeSortOptions(raw: { value: string; label: string }[]): MyTeamSo
 }
 
 export default function MyTeamPage() {
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [players, setPlayers] = useState<MyTeamPlayer[]>([]);
+  const [loading] = useState(false);
+  const [error] = useState<string | null>(null);
+
+  // Player list is intentionally empty until backend real-time sync is implemented.
+  const [players] = useState<MyTeamPlayer[]>([]);
 
   const [query, setQuery] = useState("");
   const [pos, setPos] = useState<MyTeamPosFilter>("ALL");
@@ -99,7 +90,7 @@ export default function MyTeamPage() {
 
   const [positions, setPositions] = useState<MyTeamPosFilter[]>(DEFAULT_POSITIONS);
   const [sortOptions, setSortOptions] = useState<MyTeamSortOption[]>(DEFAULT_SORT_OPTIONS);
-  const [remainingBudget, setRemainingBudget] = useState(260);
+  const [remainingBudget] = useState(260);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -131,44 +122,6 @@ export default function MyTeamPage() {
 
     return () => controller.abort();
   }, []);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    queueMicrotask(() => {
-      setLoading(true);
-      setError(null);
-    });
-
-    apiGet<MyTeamPlayersResponse>(
-      "/api/my-team/players",
-      {
-        query: query.trim() || undefined,
-        position: pos,
-        sort,
-        page: 1,
-        limit: 50,
-      },
-      controller.signal
-    )
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        setPlayers(data.items);
-        setRemainingBudget(data.remainingBudget);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        console.error(err);
-        setPlayers([]);
-        setError(err instanceof Error ? err.message : "Unknown error");
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) {
-          setLoading(false);
-        }
-      });
-
-    return () => controller.abort();
-  }, [query, pos, sort]);
 
   return (
     <div className="space-y-6">
