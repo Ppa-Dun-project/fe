@@ -1,5 +1,7 @@
-import { useMemo, useState } from "react";
-import type { DraftPlayer, DraftPosition } from "../../../types/draft";
+﻿import { useMemo, useState } from "react";
+import type { DraftPlayer } from "../../../types/draft";
+
+type DraftPosition = DraftPlayer["positions"][number];
 
 type Props = {
   open: boolean;
@@ -73,7 +75,7 @@ export default function AddBidModal({
                 </div>
               </div>
               <div className="mt-2 text-xs text-white/35">
-                상대 예산 추적을 위해 실제 영입 금액을 기록합니다.
+                남은 예산 추적을 위해 실제 영입 금액을 기록합니다.
               </div>
             </div>
 
@@ -82,7 +84,7 @@ export default function AddBidModal({
               <div className="mt-2 text-3xl font-black text-emerald-400">
                 ${player.recommendedBid}
               </div>
-              <div className="mt-1 text-xs text-white/35">권장 드래프트 비용 기준입니다.</div>
+              <div className="mt-1 text-xs text-white/35">권장 드래프트 비용 기준값입니다.</div>
             </div>
 
             <div className="border-t border-white/10 pt-4">
@@ -90,7 +92,7 @@ export default function AddBidModal({
 
               {allowedPositions.length === 0 ? (
                 <div className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-                  배치 가능한 포지션 슬롯이 없습니다.
+                  배치 가능한 포지션이 없습니다.
                 </div>
               ) : (
                 <div className="mt-3 flex flex-wrap gap-2">

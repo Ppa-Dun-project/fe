@@ -7,13 +7,13 @@ import { useAuth } from "../lib/auth";
 import type {
   DraftPick,
   DraftPlayer,
-  DraftPosition,
   DraftPositionFilter,
   DraftSort,
   DraftTeam,
 } from "../types/draft";
+type DraftPosition = DraftPlayer["positions"][number];
 
-import { buildMockDraftTeams, draftPositionFilters, mockDraftPlayers } from "../features/draft/mock";
+import { buildMockDraftTeams } from "../features/draft/mock";
 import {
   buildSlotTemplate,
   calculateCurrentRound,
@@ -36,6 +36,22 @@ import DraftRoomBoard from "../features/draft/components/DraftRoomBoard";
 import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
 
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+const BACKEND_LIST_LIMIT = 200;
+
+const draftPositionFilters = [
+  "ALL",
+  "C",
+  "1B",
+  "2B",
+  "3B",
+  "SS",
+  "OF",
+  "UTIL",
+  "SP",
+  "RP",
+] as const;
+
 const SORT_OPTIONS: { value: DraftSort; label: string }[] = [
   { value: "score_desc", label: "By Score (desc)" },
   { value: "score_asc", label: "By Score (asc)" },
@@ -46,6 +62,81 @@ const SORT_OPTIONS: { value: DraftSort; label: string }[] = [
   { value: "rbi_desc", label: "By RBI" },
   { value: "sb_desc", label: "By SB" },
 ];
+
+type ApiPlayerListItem = {
+  id: number;
+  name: string;
+  team: string;
+  positions: string[];
+  valueScore: number;
+};
+
+type ApiPlayersListResponse = {
+  items: ApiPlayerListItem[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+};
+
+type ApiPlayerDetailResponse = {
+  id: number;
+  name: string;
+  team: string;
+  positions: string[];
+  valueScore: number;
+  stats: {
+    hr: number;
+  };
+};
+
+const DRAFT_POSITIONS = new Set<DraftPosition>([
+  "C",
+  "1B",
+  "2B",
+  "3B",
+  "SS",
+  "OF",
+  "UTIL",
+  "SP",
+  "RP",
+  "BENCH",
+]);
+
+async function requestPlayers(
+  params: URLSearchParams,
+  signal: AbortSignal
+): Promise<ApiPlayersListResponse> {
+  const res = await fetch(`${API_BASE_URL}/api/players?${params.toString()}`, { signal });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as ApiPlayersListResponse;
+}
+
+async function requestPlayerDetail(
+  playerId: number,
+  signal: AbortSignal
+): Promise<ApiPlayerDetailResponse> {
+  const res = await fetch(`${API_BASE_URL}/api/players/${playerId}`, { signal });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as ApiPlayerDetailResponse;
+}
+
+function normalizeDraftPositions(rawPositions: string[]): DraftPosition[] {
+  const normalized = rawPositions
+    .map((pos) => pos.trim().toUpperCase())
+    .map((pos) => (pos === "DH" ? "UTIL" : pos))
+    .filter((pos): pos is DraftPosition => DRAFT_POSITIONS.has(pos as DraftPosition))
+    .filter((pos) => pos !== "BENCH");
+
+  if (normalized.length === 0) return ["UTIL"];
+  return Array.from(new Set(normalized));
+}
+
+function estimateRecommendedBid(valueScore: number, positions: DraftPosition[]): number {
+  const isPitcher = positions.every((pos) => pos === "SP" || pos === "RP");
+  const multiplier = isPitcher ? 0.28 : 0.45;
+  return Math.max(1, Math.round(valueScore * multiplier));
+}
 
 export default function DraftPage() {
   const authed = useAuth();
@@ -61,8 +152,7 @@ export default function DraftPage() {
   const rosterSlots = useMemo(() => clampRosterSize(config.rosterPlayers), [config.rosterPlayers]);
   const slotTemplate = useMemo(() => buildSlotTemplate(rosterSlots), [rosterSlots]);
 
-  // TODO(백엔드/DB): 선수 목록은 실제 Draft API 응답으로 교체 필요
-  const [players] = useState<DraftPlayer[]>(mockDraftPlayers);
+  const [players, setPlayers] = useState<DraftPlayer[]>([]);
 
   // 초기 더미 드래프트 상태
   const [picks, setPicks] = useState<DraftPick[]>(() => seedInitialPicks(teams, slotTemplate));
@@ -71,8 +161,8 @@ export default function DraftPage() {
   const [position, setPosition] = useState<DraftPositionFilter>("ALL");
   const [sort, setSort] = useState<DraftSort>("score_desc");
 
-  const [loading] = useState(false);
-  const [error] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   // Compare toggle state (placeholder for later compare feature)
   const [compareAId, setCompareAId] = useState<string | null>(null);
@@ -201,6 +291,65 @@ export default function DraftPage() {
     localStorage.setItem("ppadun_draft_room_mock", JSON.stringify(picks));
   }, [picks]);
 
+  // 선수 목록은 backend API에서 로드하고 현재 Draft UI 타입으로 매핑한다.
+  useEffect(() => {
+    const controller = new AbortController();
+
+    const requestParams = new URLSearchParams();
+    if (query.trim()) requestParams.set("query", query.trim());
+    requestParams.set("sort", "value_desc");
+    requestParams.set("page", "1");
+    requestParams.set("limit", String(BACKEND_LIST_LIMIT));
+
+    queueMicrotask(() => {
+      setLoading(true);
+      setError(null);
+    });
+
+    requestPlayers(requestParams, controller.signal)
+      .then(async (listData) => {
+        const detailResults = await Promise.allSettled(
+          listData.items.map((item) => requestPlayerDetail(item.id, controller.signal))
+        );
+        if (controller.signal.aborted) return;
+
+        const nextPlayers: DraftPlayer[] = listData.items.map((item, idx) => {
+          const detail = detailResults[idx].status === "fulfilled" ? detailResults[idx].value : null;
+          const positions = normalizeDraftPositions(detail?.positions ?? item.positions);
+          const valueScore = detail?.valueScore ?? item.valueScore;
+          const hr = detail?.stats?.hr;
+
+          return {
+            id: String(item.id),
+            name: item.name,
+            positions,
+            recommendedBid: estimateRecommendedBid(valueScore, positions),
+            team: item.team,
+            avg: null,
+            hr: typeof hr === "number" ? hr : null,
+            rbi: null,
+            sb: null,
+            ppaValue: valueScore,
+          };
+        });
+
+        setPlayers(nextPlayers);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setPlayers([]);
+        setError(err instanceof Error ? err.message : "Unknown error");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [query]);
+
   return (
     <div className="space-y-6">
       <FadeIn>
@@ -287,7 +436,7 @@ export default function DraftPage() {
               return (
                 <button
                   key={p}
-                  onClick={() => setPosition(p)}
+                  onClick={() => setPosition(p as DraftPositionFilter)}
                   className={[
                     "rounded-full px-3 py-1 text-xs font-extrabold transition",
                     active
@@ -492,7 +641,7 @@ export default function DraftPage() {
           </div>
 
           <div className="border-t border-white/10 px-4 py-3 text-xs text-white/45">
-            TODO(백엔드/DB): 이 선수 목록은 현재 mock 데이터입니다. Draft 저장/삭제, 팀별 상태, 액션 결과는 추후 DB/API로 교체해야 합니다.
+            Players are loaded from backend API. Draft 저장/삭제, 팀별 상태, 액션 결과는 추후 API로 확장 예정입니다.
           </div>
         </section>
       </FadeIn>

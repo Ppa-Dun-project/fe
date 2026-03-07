@@ -1,16 +1,41 @@
-export type DraftPosition =
-  | "C"
-  | "1B"
-  | "2B"
-  | "3B"
-  | "SS"
-  | "OF"
-  | "UTIL"
-  | "SP"
-  | "RP"
-  | "BENCH";
+export type DraftPlayer = {
+  id: string;
+  name: string;
+  team: string; // MLB team
+  positions: string[]; // ex) ["DH"], ["LF"], ["SP"]
+  avg: number | null;
+  hr: number | null;
+  rbi: number | null;
+  sb: number | null;
+  ppaValue: number;
+  recommendedBid: number; // 추천/예상 드래프트 비용
+};
 
-export type DraftPositionFilter = "ALL" | Exclude<DraftPosition, "BENCH">;
+export type DraftTeam = {
+  id: string;
+  name: string;
+  isMine?: boolean;
+};
+
+export type DraftPickType = "mine" | "taken";
+
+export type DraftPick = {
+  playerId: string;
+  draftedByTeamId: string;
+  slotIndex: number;
+  slotPos: string;
+  bid: number | null;
+  type: DraftPickType;
+};
+
+export type DraftConfigLocal = {
+  myTeamName?: string;
+  oppTeamName?: string;
+  leagueType?: string;
+  budget?: number;
+  rosterPlayers?: number;
+  createdAt?: string;
+};
 
 export type DraftSort =
   | "score_desc"
@@ -22,38 +47,16 @@ export type DraftSort =
   | "rbi_desc"
   | "sb_desc";
 
-export type DraftPlayer = {
-  id: string;
-  name: string;
-  positions: DraftPosition[];
-  recommendedBid: number;
-  team: string;
-  avg?: number;
-  hr?: number;
-  rbi?: number;
-  sb?: number;
-  ppaValue: number;
-};
-
-export type DraftTeam = {
-  id: string;
-  name: string;
-  isMine: boolean;
-};
-
-export type DraftPick = {
-  playerId: string;
-  draftedByTeamId: string;
-  slotIndex: number;
-  slotPos: DraftPosition;
-  bid: number | null;
-  type: "mine" | "taken";
-};
-
-export type DraftConfig = {
-  leagueType: string;
-  budget: number;
-  rosterPlayers: number;
-  myTeamName: string;
-  oppTeamName: string;
-};
+export type DraftPositionFilter =
+  | "ALL"
+  | "SP"
+  | "RP"
+  | "C"
+  | "1B"
+  | "2B"
+  | "3B"
+  | "SS"
+  | "LF"
+  | "CF"
+  | "RF"
+  | "DH";
