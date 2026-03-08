@@ -1,4 +1,4 @@
-import { useMemo, useRef } from "react";
+﻿import { useMemo, useRef } from "react";
 import type { DraftPick, DraftPlayer, DraftTeam } from "../../../types/draft";
 import { teamAccentClass } from "../utils";
 
@@ -57,7 +57,7 @@ export default function DraftRoomBoard({
         <div>
           <div className="text-sm font-black text-white">Draft Room</div>
           <div className="mt-1 text-xs text-white/55">
-            Live draft status by team • {totalRounds} roster slots each
+            Live draft status by team | {totalRounds} roster slots each
           </div>
         </div>
 
@@ -74,7 +74,7 @@ export default function DraftRoomBoard({
               className="absolute left-0 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/10 bg-black/70 p-2 text-white/80 backdrop-blur hover:bg-white/10"
               aria-label="Scroll left"
             >
-              ←
+              &lt;
             </button>
 
             <button
@@ -82,7 +82,7 @@ export default function DraftRoomBoard({
               className="absolute right-0 top-1/2 z-20 -translate-y-1/2 rounded-full border border-white/10 bg-black/70 p-2 text-white/80 backdrop-blur hover:bg-white/10"
               aria-label="Scroll right"
             >
-              →
+              &gt;
             </button>
           </>
         )}
@@ -108,7 +108,7 @@ export default function DraftRoomBoard({
                       accent.header,
                     ].join(" ")}
                   >
-                    {team.isMine ? `★ ${team.name}` : team.name}
+                    {team.isMine ? `My | ${team.name}` : team.name}
                   </div>
 
                   <div className="space-y-2">
@@ -133,7 +133,7 @@ export default function DraftRoomBoard({
                               aria-label="Remove pick"
                               title="Remove pick"
                             >
-                              ✕
+                              x
                             </button>
 
                             <div className="pr-5 text-[11px] font-black text-white">
@@ -141,9 +141,9 @@ export default function DraftRoomBoard({
                             </div>
                             <div className="mt-1 flex items-center gap-2 text-[10px] text-white/55">
                               <span>{slotPos}</span>
-                              <span>•</span>
+                              <span>|</span>
                               <span>{player.team}</span>
-                              <span>•</span>
+                              <span>|</span>
                               <span>${pick.bid ?? "?"}</span>
                             </div>
                           </div>

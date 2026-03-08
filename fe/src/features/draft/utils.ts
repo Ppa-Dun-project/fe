@@ -68,16 +68,16 @@ export function buildSlotTemplate(count: number): string[] {
     "OF",
     "UTIL",
     "UTIL",
-    "BN",
-    "BN",
-    "BN",
-    "BN",
-    "BN",
-    "BN",
-    "BN",
-    "BN",
-    "BN",
-    "BN",
+    "BENCH",
+    "BENCH",
+    "BENCH",
+    "BENCH",
+    "BENCH",
+    "BENCH",
+    "BENCH",
+    "BENCH",
+    "BENCH",
+    "BENCH",
   ];
   return base.slice(0, count);
 }
@@ -228,7 +228,7 @@ export function findAvailableSlotIndex(
 
   for (let i = 0; i < slotTemplate.length; i += 1) {
     if (occupied.has(i)) continue;
-    if (slotTemplate[i] === "BN") return i;
+    if (slotTemplate[i] === "BENCH") return i;
   }
 
   return -1;

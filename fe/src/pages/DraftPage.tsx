@@ -22,9 +22,7 @@ import {
   calculateRemainingBudget,
   clampRosterSize,
   draftCostClass,
-  findAvailableSlotIndex,
   formatAvg,
-  getAllowedPositionsForPlayer,
   getPlayerDraftStatus,
   mlbTeamBadgeClass,
   readDraftConfig,
@@ -34,6 +32,7 @@ import {
 import DraftRoomBoard from "../features/draft/components/DraftRoomBoard";
 import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
+import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
 
 const ROOM_ID = "default";
 const BACKEND_LIST_LIMIT = 200;
@@ -94,6 +93,22 @@ type DraftPlayersResponse = {
 type DraftPicksResponse = {
   roomId: string;
   items: DraftPick[];
+};
+
+type DraftAllowedPositionsResponse = {
+  roomId: string;
+  teamId: string;
+  playerId: string;
+  allowedPositions: DraftPosition[];
+  defaultSelectedPos?: DraftPosition | null;
+};
+
+type DraftPickUpsertIn = {
+  playerId: string;
+  draftedByTeamId: string;
+  slotPos: DraftPosition;
+  bid: number | null;
+  type: DraftPick["type"];
 };
 
 function toInitialConfig(local: DraftConfigLocal): DraftConfigResponse {
@@ -175,9 +190,12 @@ export default function DraftPage() {
 
   const [compareAId, setCompareAId] = useState<string | null>(null);
   const [compareBId, setCompareBId] = useState<string | null>(null);
+  const [comparisonOpen, setComparisonOpen] = useState(false);
 
   const [addTarget, setAddTarget] = useState<DraftPlayer | null>(null);
   const [takenTarget, setTakenTarget] = useState<DraftPlayer | null>(null);
+  const [addAllowedPositions, setAddAllowedPositions] = useState<DraftPosition[]>([]);
+  const [takenAllowedByTeam, setTakenAllowedByTeam] = useState<Record<string, DraftPosition[]>>({});
 
   const rosterSlots = useMemo(() => clampRosterSize(config.rosterPlayers), [config.rosterPlayers]);
   const slotTemplate = useMemo(() => buildSlotTemplate(rosterSlots), [rosterSlots]);
@@ -208,21 +226,88 @@ export default function DraftPage() {
     [players, compareBId]
   );
 
-  const addAllowedPositions = useMemo(() => {
-    if (!addTarget || !myTeam) return [];
-    return getAllowedPositionsForPlayer(myTeam.id, addTarget, slotTemplate, picks);
-  }, [addTarget, myTeam, slotTemplate, picks]);
+  useEffect(() => {
+    if (!addTarget || !myTeam) return;
 
-  const takenAllowedByTeam = useMemo(() => {
-    if (!takenTarget) return {};
+    const controller = new AbortController();
+    apiGet<DraftAllowedPositionsResponse>(
+      "/api/draft/allowed-positions",
+      {
+        roomId: ROOM_ID,
+        playerId: addTarget.id,
+        teamId: myTeam.id,
+        rosterPlayers: rosterSlots,
+      },
+      controller.signal
+    )
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setAddAllowedPositions(data.allowedPositions ?? []);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setAddAllowedPositions([]);
+        setError(err instanceof Error ? err.message : "Failed to load allowed positions");
+      });
 
-    const out: Record<string, DraftPosition[]> = {};
-    for (const team of teams) {
-      if (team.isMine) continue;
-      out[team.id] = getAllowedPositionsForPlayer(team.id, takenTarget, slotTemplate, picks);
-    }
-    return out;
-  }, [takenTarget, teams, slotTemplate, picks]);
+    return () => controller.abort();
+  }, [addTarget, myTeam, rosterSlots]);
+
+  useEffect(() => {
+    if (!takenTarget) return;
+
+    const controller = new AbortController();
+    const otherTeams = teams.filter((team) => !team.isMine);
+
+    Promise.all(
+      otherTeams.map(async (team) => {
+        const data = await apiGet<DraftAllowedPositionsResponse>(
+          "/api/draft/allowed-positions",
+          {
+            roomId: ROOM_ID,
+            playerId: takenTarget.id,
+            teamId: team.id,
+            rosterPlayers: rosterSlots,
+          },
+          controller.signal
+        );
+        return [team.id, data.allowedPositions ?? []] as const;
+      })
+    )
+      .then((entries) => {
+        if (controller.signal.aborted) return;
+        setTakenAllowedByTeam(Object.fromEntries(entries));
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setTakenAllowedByTeam({});
+        setError(err instanceof Error ? err.message : "Failed to load allowed positions");
+      });
+
+    return () => controller.abort();
+  }, [takenTarget, teams, rosterSlots]);
+
+  const openAddModal = (player: DraftPlayer) => {
+    setAddAllowedPositions([]);
+    setAddTarget(player);
+  };
+
+  const openTakenModal = (player: DraftPlayer) => {
+    setTakenAllowedByTeam({});
+    setTakenTarget(player);
+  };
+
+  const closeAddModal = () => {
+    setAddAllowedPositions([]);
+    setAddTarget(null);
+  };
+
+  const closeTakenModal = () => {
+    setTakenAllowedByTeam({});
+    setTakenTarget(null);
+  };
 
   useEffect(() => {
     const controller = new AbortController();
@@ -307,6 +392,7 @@ export default function DraftPage() {
 
   const handleCompareToggle = (playerId: string) => {
     if (!authed) return;
+    if (comparisonOpen) setComparisonOpen(false);
 
     if (compareAId === playerId) {
       setCompareAId(compareBId);
@@ -335,6 +421,7 @@ export default function DraftPage() {
   const clearCompare = () => {
     setCompareAId(null);
     setCompareBId(null);
+    setComparisonOpen(false);
   };
 
   const handleRemovePick = (pick: DraftPick) => {
@@ -349,22 +436,22 @@ export default function DraftPage() {
   const handleAddFinish = (bid: number, selectedPos: DraftPosition) => {
     if (!addTarget || !myTeam) return;
 
-    const slotIndex = findAvailableSlotIndex(myTeam.id, selectedPos, slotTemplate, picks);
-    if (slotIndex === -1) return;
-
-    const payload: DraftPick = {
+    const payload: DraftPickUpsertIn = {
       playerId: addTarget.id,
       draftedByTeamId: myTeam.id,
-      slotIndex,
       slotPos: selectedPos,
       bid,
       type: "mine",
     };
 
-    void apiPost<DraftPicksResponse, DraftPick>("/api/draft/picks", payload, { roomId: ROOM_ID })
+    void apiPost<DraftPicksResponse, DraftPickUpsertIn>(
+      "/api/draft/picks",
+      payload,
+      { roomId: ROOM_ID, rosterPlayers: rosterSlots }
+    )
       .then((data) => {
         setPicks(data.items);
-        setAddTarget(null);
+        closeAddModal();
         draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       })
       .catch((err: unknown) => {
@@ -380,22 +467,22 @@ export default function DraftPage() {
   ) => {
     if (!takenTarget) return;
 
-    const slotIndex = findAvailableSlotIndex(draftedByTeamId, selectedPos, slotTemplate, picks);
-    if (slotIndex === -1) return;
-
-    const payload: DraftPick = {
+    const payload: DraftPickUpsertIn = {
       playerId: takenTarget.id,
       draftedByTeamId,
-      slotIndex,
       slotPos: selectedPos,
       bid,
       type: "taken",
     };
 
-    void apiPost<DraftPicksResponse, DraftPick>("/api/draft/picks", payload, { roomId: ROOM_ID })
+    void apiPost<DraftPicksResponse, DraftPickUpsertIn>(
+      "/api/draft/picks",
+      payload,
+      { roomId: ROOM_ID, rosterPlayers: rosterSlots }
+    )
       .then((data) => {
         setPicks(data.items);
-        setTakenTarget(null);
+        closeTakenModal();
         draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
       })
       .catch((err: unknown) => {
@@ -489,7 +576,9 @@ export default function DraftPage() {
               );
             })}
 
-            <div className="ml-auto text-lg font-black text-emerald-400">Remaining Budget: ${remainingBudget}</div>
+            <div className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-300">
+              Remaining Budget: ${remainingBudget}
+            </div>
           </div>
         </section>
       </FadeIn>
@@ -515,8 +604,8 @@ export default function DraftPage() {
                 <div className="mt-0.5 text-[11px] font-bold text-white/65">Select 2 players</div>
               </div>
 
-              <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-center">
-                <div className="min-w-0 flex-1 rounded-xl border border-emerald-400/50 bg-emerald-500/12 px-3 py-2 shadow-[0_0_16px_rgba(16,185,129,0.18)]">
+              <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-center">
+                <div className="min-w-0 w-full rounded-xl border border-emerald-400/50 bg-emerald-500/12 px-3 py-2 shadow-[0_0_16px_rgba(16,185,129,0.18)] sm:w-[300px]">
                   {selectedA ? (
                     <>
                       <div className="flex items-center gap-2 text-xs text-white/80">
@@ -538,7 +627,7 @@ export default function DraftPage() {
 
                 <div className="text-center text-xs font-black text-fuchsia-200 sm:px-1">VS</div>
 
-                <div className="min-w-0 flex-1 rounded-xl border border-emerald-400/50 bg-emerald-500/12 px-3 py-2 shadow-[0_0_16px_rgba(16,185,129,0.18)]">
+                <div className="min-w-0 w-full rounded-xl border border-emerald-400/50 bg-emerald-500/12 px-3 py-2 shadow-[0_0_16px_rgba(16,185,129,0.18)] sm:w-[300px]">
                   {selectedB ? (
                     <>
                       <div className="flex items-center gap-2 text-xs text-white/80">
@@ -571,11 +660,12 @@ export default function DraftPage() {
               </button>
               <button
                 type="button"
+                onClick={() => setComparisonOpen(true)}
                 disabled={!selectedA || !selectedB || !authed}
                 className="rounded-xl bg-fuchsia-600 px-4 py-2 text-xs font-black text-white transition hover:bg-fuchsia-500 disabled:opacity-40"
-                title="Compare popup will be connected later"
+                title={!authed ? "Sign in required" : "Open player comparison"}
               >
-                ? Compare
+                Compare
               </button>
             </div>
           </div>
@@ -675,13 +765,13 @@ export default function DraftPage() {
                       ) : authed ? (
                         <>
                           <button
-                            onClick={() => setAddTarget(player)}
+                            onClick={() => openAddModal(player)}
                             className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-200 ring-1 ring-emerald-400/20 transition hover:bg-emerald-500/25"
                           >
                             Add
                           </button>
                           <button
-                            onClick={() => setTakenTarget(player)}
+                            onClick={() => openTakenModal(player)}
                             className="rounded-xl bg-rose-500/15 px-3 py-2 text-xs font-black text-rose-200 ring-1 ring-rose-400/20 transition hover:bg-rose-500/25"
                           >
                             Taken
@@ -738,7 +828,7 @@ export default function DraftPage() {
           open={true}
           player={addTarget}
           allowedPositions={addAllowedPositions}
-          onClose={() => setAddTarget(null)}
+          onClose={closeAddModal}
           onConfirm={handleAddFinish}
         />
       )}
@@ -750,10 +840,17 @@ export default function DraftPage() {
           player={takenTarget}
           teams={teams}
           allowedPositionsByTeam={takenAllowedByTeam}
-          onClose={() => setTakenTarget(null)}
+          onClose={closeTakenModal}
           onConfirm={handleTakenFinish}
         />
       )}
+
+      <PlayerComparisonModal
+        open={comparisonOpen && Boolean(selectedA) && Boolean(selectedB)}
+        playerA={selectedA}
+        playerB={selectedB}
+        onClose={() => setComparisonOpen(false)}
+      />
     </div>
   );
 }

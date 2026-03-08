@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+﻿import { useMemo, useState } from "react";
 import Dropdown from "../../../components/ui/Dropdown";
 import type { DraftPlayer, DraftTeam } from "../../../types/draft";
 
@@ -100,7 +100,7 @@ export default function TakenBidModal({
                 </div>
               </div>
               <div className="mt-2 text-xs text-white/35">
-                상대 예산 추적을 위해 실제 영입 금액을 기록합니다.
+                Record the actual winning amount to track opponent budgets.
               </div>
             </div>
 
@@ -109,7 +109,7 @@ export default function TakenBidModal({
 
               {currentPositions.length === 0 ? (
                 <div className="mt-3 rounded-2xl border border-rose-400/20 bg-rose-500/10 px-4 py-3 text-sm text-rose-200">
-                  선택한 팀에 배치 가능한 포지션 슬롯이 없습니다.
+                  No eligible position is available for this team.
                 </div>
               ) : (
                 <div className="mt-3 flex flex-wrap gap-2">

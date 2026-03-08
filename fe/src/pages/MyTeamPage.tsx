@@ -20,6 +20,17 @@ type MyTeamSortOptionsResponse = {
   sorts: { value: string; label: string }[];
 };
 
+type MyTeamPlayersResponse = {
+  items: MyTeamPlayer[];
+  page: number;
+  limit: number;
+  total: number;
+  totalPages: number;
+  totalBudget: number;
+  spentBudget: number;
+  remainingBudget: number;
+};
+
 const DEFAULT_POSITIONS: MyTeamPosFilter[] = [
   "ALL",
   "C",
@@ -78,11 +89,9 @@ function normalizeSortOptions(raw: { value: string; label: string }[]): MyTeamSo
 }
 
 export default function MyTeamPage() {
-  const [loading] = useState(false);
-  const [error] = useState<string | null>(null);
-
-  // Player list is intentionally empty until backend real-time sync is implemented.
-  const [players] = useState<MyTeamPlayer[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [players, setPlayers] = useState<MyTeamPlayer[]>([]);
 
   const [query, setQuery] = useState("");
   const [pos, setPos] = useState<MyTeamPosFilter>("ALL");
@@ -90,7 +99,9 @@ export default function MyTeamPage() {
 
   const [positions, setPositions] = useState<MyTeamPosFilter[]>(DEFAULT_POSITIONS);
   const [sortOptions, setSortOptions] = useState<MyTeamSortOption[]>(DEFAULT_SORT_OPTIONS);
-  const [remainingBudget] = useState(260);
+  const [remainingBudget, setRemainingBudget] = useState(260);
+  const [spentBudget, setSpentBudget] = useState(0);
+  const [totalBudget, setTotalBudget] = useState(260);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -123,6 +134,46 @@ export default function MyTeamPage() {
     return () => controller.abort();
   }, []);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    queueMicrotask(() => {
+      setLoading(true);
+      setError(null);
+    });
+
+    apiGet<MyTeamPlayersResponse>(
+      "/api/my-team/players",
+      {
+        query: query.trim() || undefined,
+        position: pos,
+        sort,
+        page: 1,
+        limit: 200,
+      },
+      controller.signal
+    )
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setPlayers(data.items);
+        setRemainingBudget(data.remainingBudget);
+        setSpentBudget(data.spentBudget);
+        setTotalBudget(data.totalBudget);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setPlayers([]);
+        setError(err instanceof Error ? err.message : "Failed to load my team players");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) {
+          setLoading(false);
+        }
+      });
+
+    return () => controller.abort();
+  }, [query, pos, sort]);
+
   return (
     <div className="space-y-6">
       <FadeIn>
@@ -135,6 +186,9 @@ export default function MyTeamPage() {
           <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-6 py-4">
             <div className="text-sm font-extrabold text-white/70">Budget</div>
             <div className="text-xl font-black text-emerald-400">${remainingBudget}</div>
+            <div className="text-xs font-semibold text-white/50">
+              (${spentBudget} / ${totalBudget} spent)
+            </div>
           </div>
         </div>
       </FadeIn>
