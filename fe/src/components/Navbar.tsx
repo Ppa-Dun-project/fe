@@ -40,11 +40,18 @@ export default function Navbar() {
               setDrawerOpen(false);
               navigate("/");
             }}
-            className="flex items-center gap-3 rounded-2xl p-1 hover:bg-white/5 transition"
+            className="group flex items-center gap-3 rounded-2xl border border-transparent bg-white/[0.02] p-1.5 transition hover:border-white/30 hover:bg-white/[0.09] hover:backdrop-blur-md hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_0_0_1px_rgba(255,255,255,0.05)]"
             aria-label="Go to Home"
           >
-            <img src={logo} alt="Logo" className="h-11 w-11 rounded-2xl object-cover" />
-            <span className="text-xl text-white" style={{ fontFamily: '"Jaro", system-ui' }}>
+            <img
+              src={logo}
+              alt="Logo"
+              className="h-11 w-11 rounded-2xl object-cover ring-1 ring-transparent transition group-hover:ring-white/35"
+            />
+            <span
+              className="text-xl text-white/95 transition group-hover:text-white group-hover:[text-shadow:0_0_14px_rgba(255,255,255,0.4)]"
+              style={{ fontFamily: '"Jaro", system-ui' }}
+            >
               PPA-DUN
             </span>
           </button>
@@ -120,10 +127,17 @@ export default function Navbar() {
                   setDrawerOpen(false);
                   navigate("/");
                 }}
-                className="flex items-center gap-2"
+                className="group flex items-center gap-2 rounded-2xl border border-transparent bg-white/[0.02] p-1.5 transition hover:border-white/30 hover:bg-white/[0.09] hover:backdrop-blur-md"
               >
-                <img src={logo} alt="Logo" className="h-10 w-10 rounded-2xl object-cover" />
-                <span className="text-white text-lg" style={{ fontFamily: '"Jaro", system-ui' }}>
+                <img
+                  src={logo}
+                  alt="Logo"
+                  className="h-10 w-10 rounded-2xl object-cover ring-1 ring-transparent transition group-hover:ring-white/35"
+                />
+                <span
+                  className="text-lg text-white/95 transition group-hover:text-white group-hover:[text-shadow:0_0_14px_rgba(255,255,255,0.35)]"
+                  style={{ fontFamily: '"Jaro", system-ui' }}
+                >
                   PPA-DUN
                 </span>
               </button>

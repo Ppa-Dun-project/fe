@@ -96,14 +96,6 @@ type DraftPicksResponse = {
   items: DraftPick[];
 };
 
-type DraftAllowedPositionsResponse = {
-  roomId: string;
-  teamId: string;
-  playerId: string;
-  allowedPositions: DraftPosition[];
-  defaultSelectedPos?: DraftPosition | null;
-};
-
 type DraftPickUpsertIn = {
   playerId: string;
   draftedByTeamId: string;
@@ -165,6 +157,10 @@ function normalizePositionFilters(raw: string[]): DraftPositionFilter[] {
   return normalized.length > 0 ? normalized : DEFAULT_POSITION_FILTERS;
 }
 
+function resolveDraftSlotPosition(player: DraftPlayer): DraftPosition {
+  return (player.positions[0] ?? "UTIL") as DraftPosition;
+}
+
 export default function DraftPage() {
   const authed = useAuth();
   const [searchParams] = useSearchParams();
@@ -192,12 +188,11 @@ export default function DraftPage() {
   const [compareAId, setCompareAId] = useState<string | null>(null);
   const [compareBId, setCompareBId] = useState<string | null>(null);
   const [comparisonOpen, setComparisonOpen] = useState(false);
+  const [recommendationNoticeOpen, setRecommendationNoticeOpen] = useState(false);
   const [profilePlayerId, setProfilePlayerId] = useState<number | null>(null);
 
   const [addTarget, setAddTarget] = useState<DraftPlayer | null>(null);
   const [takenTarget, setTakenTarget] = useState<DraftPlayer | null>(null);
-  const [addAllowedPositions, setAddAllowedPositions] = useState<DraftPosition[]>([]);
-  const [takenAllowedByTeam, setTakenAllowedByTeam] = useState<Record<string, DraftPosition[]>>({});
 
   const rosterSlots = useMemo(() => clampRosterSize(config.rosterPlayers), [config.rosterPlayers]);
   const slotTemplate = useMemo(() => buildSlotTemplate(rosterSlots), [rosterSlots]);
@@ -209,10 +204,24 @@ export default function DraftPage() {
 
   const myTeam = teams.find((team) => team.isMine) ?? teams[0] ?? null;
 
+  const remainingBudgetByTeam = useMemo(() => {
+    const spentByTeam = new Map<string, number>();
+    for (const pick of picks) {
+      if (typeof pick.bid !== "number") continue;
+      spentByTeam.set(pick.draftedByTeamId, (spentByTeam.get(pick.draftedByTeamId) ?? 0) + pick.bid);
+    }
+    return Object.fromEntries(
+      teams.map((team) => [
+        team.id,
+        Math.max(0, config.budget - (spentByTeam.get(team.id) ?? 0)),
+      ])
+    ) as Record<string, number>;
+  }, [teams, picks, config.budget]);
+
   const remainingBudget = useMemo(() => {
     if (!myTeam) return config.budget;
-    return calculateRemainingBudget(config.budget, myTeam.id, picks);
-  }, [config.budget, myTeam, picks]);
+    return remainingBudgetByTeam[myTeam.id] ?? calculateRemainingBudget(config.budget, myTeam.id, picks);
+  }, [config.budget, myTeam, picks, remainingBudgetByTeam]);
 
   const currentRound = useMemo(() => {
     if (teams.length === 0) return 1;
@@ -228,86 +237,19 @@ export default function DraftPage() {
     [players, compareBId]
   );
 
-  useEffect(() => {
-    if (!addTarget || !myTeam) return;
-
-    const controller = new AbortController();
-    apiGet<DraftAllowedPositionsResponse>(
-      "/api/draft/allowed-positions",
-      {
-        roomId: DRAFT_ROOM_ID,
-        playerId: addTarget.id,
-        teamId: myTeam.id,
-        rosterPlayers: rosterSlots,
-      },
-      controller.signal
-    )
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        setAddAllowedPositions(data.allowedPositions ?? []);
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        console.error(err);
-        setAddAllowedPositions([]);
-        setError(err instanceof Error ? err.message : "Failed to load allowed positions");
-      });
-
-    return () => controller.abort();
-  }, [addTarget, myTeam, rosterSlots]);
-
-  useEffect(() => {
-    if (!takenTarget) return;
-
-    const controller = new AbortController();
-    const otherTeams = teams.filter((team) => !team.isMine);
-
-    Promise.all(
-      otherTeams.map(async (team) => {
-        const data = await apiGet<DraftAllowedPositionsResponse>(
-          "/api/draft/allowed-positions",
-          {
-            roomId: DRAFT_ROOM_ID,
-            playerId: takenTarget.id,
-            teamId: team.id,
-            rosterPlayers: rosterSlots,
-          },
-          controller.signal
-        );
-        return [team.id, data.allowedPositions ?? []] as const;
-      })
-    )
-      .then((entries) => {
-        if (controller.signal.aborted) return;
-        setTakenAllowedByTeam(Object.fromEntries(entries));
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        console.error(err);
-        setTakenAllowedByTeam({});
-        setError(err instanceof Error ? err.message : "Failed to load allowed positions");
-      });
-
-    return () => controller.abort();
-  }, [takenTarget, teams, rosterSlots]);
-
   const openAddModal = (player: DraftPlayer) => {
-    setAddAllowedPositions([]);
     setAddTarget(player);
   };
 
   const openTakenModal = (player: DraftPlayer) => {
-    setTakenAllowedByTeam({});
     setTakenTarget(player);
   };
 
   const closeAddModal = () => {
-    setAddAllowedPositions([]);
     setAddTarget(null);
   };
 
   const closeTakenModal = () => {
-    setTakenAllowedByTeam({});
     setTakenTarget(null);
   };
 
@@ -426,6 +368,16 @@ export default function DraftPage() {
     setComparisonOpen(false);
   };
 
+  const clearCompareA = () => {
+    setCompareAId(null);
+    setComparisonOpen(false);
+  };
+
+  const clearCompareB = () => {
+    setCompareBId(null);
+    setComparisonOpen(false);
+  };
+
   const openPlayerInfo = (rawPlayerId: string) => {
     const parsed = Number(rawPlayerId);
     if (!Number.isFinite(parsed)) {
@@ -448,13 +400,13 @@ export default function DraftPage() {
       });
   };
 
-  const handleAddFinish = (bid: number, selectedPos: DraftPosition) => {
+  const handleAddFinish = (bid: number) => {
     if (!addTarget || !myTeam) return;
 
     const payload: DraftPickUpsertIn = {
       playerId: addTarget.id,
       draftedByTeamId: myTeam.id,
-      slotPos: selectedPos,
+      slotPos: resolveDraftSlotPosition(addTarget),
       bid,
       type: "mine",
     };
@@ -475,17 +427,13 @@ export default function DraftPage() {
       });
   };
 
-  const handleTakenFinish = (
-    draftedByTeamId: string,
-    bid: number | null,
-    selectedPos: DraftPosition
-  ) => {
+  const handleTakenFinish = (draftedByTeamId: string, bid: number) => {
     if (!takenTarget) return;
 
     const payload: DraftPickUpsertIn = {
       playerId: takenTarget.id,
       draftedByTeamId,
-      slotPos: selectedPos,
+      slotPos: resolveDraftSlotPosition(takenTarget),
       bid,
       type: "taken",
     };
@@ -602,6 +550,7 @@ export default function DraftPage() {
         <div className="flex justify-end">
           <button
             type="button"
+            onClick={() => setRecommendationNoticeOpen(true)}
             className="rounded-xl border border-fuchsia-400/35 bg-fuchsia-500/12 px-4 py-2 text-xs font-black text-fuchsia-100 transition hover:bg-fuchsia-500/20"
             title="Recommendation popup will be connected later"
           >
@@ -623,9 +572,20 @@ export default function DraftPage() {
                 <div className="min-w-0 w-full rounded-xl border border-emerald-400/50 bg-emerald-500/12 px-3 py-2 shadow-[0_0_16px_rgba(16,185,129,0.18)] sm:w-[300px]">
                   {selectedA ? (
                     <>
-                      <div className="flex items-center gap-2 text-xs text-white/80">
-                        <span className="rounded bg-emerald-500/25 px-1.5 py-0.5 font-black text-emerald-100">A</span>
-                        <span className="truncate font-black text-white">{selectedA.name}</span>
+                      <div className="flex items-center justify-between gap-2 text-xs text-white/80">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="rounded bg-emerald-500/25 px-1.5 py-0.5 font-black text-emerald-100">A</span>
+                          <span className="truncate font-black text-white">{selectedA.name}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={clearCompareA}
+                          className="grid h-5 w-5 place-items-center rounded-full border border-white/20 bg-black/20 text-[10px] font-black text-white/80 transition hover:bg-white/15"
+                          aria-label="Remove player A from compare"
+                          title="Remove player A"
+                        >
+                          X
+                        </button>
                       </div>
                       <div className="mt-1 text-[11px] font-semibold text-white/70">
                         {selectedA.positions.join("/")} - {selectedA.team} - ${selectedA.recommendedBid}
@@ -644,9 +604,20 @@ export default function DraftPage() {
                 <div className="min-w-0 w-full rounded-xl border border-emerald-400/50 bg-emerald-500/12 px-3 py-2 shadow-[0_0_16px_rgba(16,185,129,0.18)] sm:w-[300px]">
                   {selectedB ? (
                     <>
-                      <div className="flex items-center gap-2 text-xs text-white/80">
-                        <span className="rounded bg-emerald-500/25 px-1.5 py-0.5 font-black text-emerald-100">B</span>
-                        <span className="truncate font-black text-white">{selectedB.name}</span>
+                      <div className="flex items-center justify-between gap-2 text-xs text-white/80">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <span className="rounded bg-emerald-500/25 px-1.5 py-0.5 font-black text-emerald-100">B</span>
+                          <span className="truncate font-black text-white">{selectedB.name}</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={clearCompareB}
+                          className="grid h-5 w-5 place-items-center rounded-full border border-white/20 bg-black/20 text-[10px] font-black text-white/80 transition hover:bg-white/15"
+                          aria-label="Remove player B from compare"
+                          title="Remove player B"
+                        >
+                          X
+                        </button>
                       </div>
                       <div className="mt-1 text-[11px] font-semibold text-white/70">
                         {selectedB.positions.join("/")} - {selectedB.team} - ${selectedB.recommendedBid}
@@ -848,7 +819,7 @@ export default function DraftPage() {
           key={`add-${addTarget.id}`}
           open={true}
           player={addTarget}
-          allowedPositions={addAllowedPositions}
+          remainingBudget={remainingBudget}
           onClose={closeAddModal}
           onConfirm={handleAddFinish}
         />
@@ -858,13 +829,13 @@ export default function DraftPage() {
         <TakenBidModal
           key={`taken-${takenTarget.id}`}
           open={true}
-          player={takenTarget}
-          teams={teams}
-          allowedPositionsByTeam={takenAllowedByTeam}
-          onClose={closeTakenModal}
-          onConfirm={handleTakenFinish}
-        />
-      )}
+      player={takenTarget}
+      teams={teams}
+      remainingBudgetByTeam={remainingBudgetByTeam}
+      onClose={closeTakenModal}
+      onConfirm={handleTakenFinish}
+    />
+  )}
 
       <PlayerComparisonModal
         open={comparisonOpen && Boolean(selectedA) && Boolean(selectedB)}
@@ -878,6 +849,32 @@ export default function DraftPage() {
         playerId={profilePlayerId}
         onClose={closePlayerInfo}
       />
+
+      {recommendationNoticeOpen && (
+        <div className="fixed inset-0 z-[72] grid place-items-center p-4">
+          <button
+            type="button"
+            aria-label="Close recommendation notice"
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setRecommendationNoticeOpen(false)}
+          />
+          <div className="relative w-[92%] max-w-sm rounded-3xl border border-fuchsia-400/30 bg-[#130f1d] p-5 shadow-2xl">
+            <div className="text-lg font-black text-white">PPA-DUN Recommendation</div>
+            <div className="mt-2 text-sm font-semibold text-fuchsia-100">
+              Planned for development in V2.
+            </div>
+            <div className="mt-5 flex justify-end">
+              <button
+                type="button"
+                onClick={() => setRecommendationNoticeOpen(false)}
+                className="rounded-full border border-fuchsia-300/30 bg-fuchsia-600 px-5 py-1.5 text-sm font-bold text-white transition hover:bg-fuchsia-500"
+              >
+                OK
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

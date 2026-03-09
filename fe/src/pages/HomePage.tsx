@@ -70,7 +70,7 @@ export default function HomePage() {
             <img
               src={baseballImg}
               alt="Baseball background"
-              className="h-full w-full object-cover object-right origin-right scale-80 brightness-135 saturate-110"
+              className="h-full w-full object-cover object-right origin-right scale-80 brightness-145 saturate-110"
             />
             <div className="absolute inset-0 bg-gradient-to-r from-black via-black/70 to-black/20" />
             <div className="absolute inset-0 shadow-[inset_0_0_120px_rgba(0,0,0,0.75)]" />
