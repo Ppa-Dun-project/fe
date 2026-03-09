@@ -108,7 +108,7 @@ export default function DraftRoomBoard({
                       accent.header,
                     ].join(" ")}
                   >
-                    {team.isMine ? `My | ${team.name}` : team.name}
+                    {team.name}
                   </div>
 
                   <div className="space-y-2">
