@@ -5,6 +5,7 @@ import Skeleton from "../components/ui/Skeleton";
 import Dropdown from "../components/ui/Dropdown";
 import { useAuth } from "../lib/auth";
 import { apiDelete, apiGet, apiPost } from "../lib/api";
+import { DRAFT_ROOM_ID } from "../lib/runtimeConfig";
 
 import type {
   DraftConfigLocal,
@@ -33,8 +34,8 @@ import DraftRoomBoard from "../features/draft/components/DraftRoomBoard";
 import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
 import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
+import PlayerInfoModal from "../features/players/components/PlayerInfoModal";
 
-const ROOM_ID = "default";
 const BACKEND_LIST_LIMIT = 200;
 
 const DEFAULT_POSITION_FILTERS: DraftPositionFilter[] = [
@@ -191,6 +192,7 @@ export default function DraftPage() {
   const [compareAId, setCompareAId] = useState<string | null>(null);
   const [compareBId, setCompareBId] = useState<string | null>(null);
   const [comparisonOpen, setComparisonOpen] = useState(false);
+  const [profilePlayerId, setProfilePlayerId] = useState<number | null>(null);
 
   const [addTarget, setAddTarget] = useState<DraftPlayer | null>(null);
   const [takenTarget, setTakenTarget] = useState<DraftPlayer | null>(null);
@@ -233,7 +235,7 @@ export default function DraftPage() {
     apiGet<DraftAllowedPositionsResponse>(
       "/api/draft/allowed-positions",
       {
-        roomId: ROOM_ID,
+        roomId: DRAFT_ROOM_ID,
         playerId: addTarget.id,
         teamId: myTeam.id,
         rosterPlayers: rosterSlots,
@@ -265,7 +267,7 @@ export default function DraftPage() {
         const data = await apiGet<DraftAllowedPositionsResponse>(
           "/api/draft/allowed-positions",
           {
-            roomId: ROOM_ID,
+            roomId: DRAFT_ROOM_ID,
             playerId: takenTarget.id,
             teamId: team.id,
             rosterPlayers: rosterSlots,
@@ -321,7 +323,7 @@ export default function DraftPage() {
         myTeamName: localConfig.myTeamName ?? "My Team",
         oppTeamName: localConfig.oppTeamName ?? "Team A",
         opponentsCount: localConfig.opponentsCount ?? 5,
-        roomId: ROOM_ID,
+        roomId: DRAFT_ROOM_ID,
       },
       controller.signal
     )
@@ -424,8 +426,21 @@ export default function DraftPage() {
     setComparisonOpen(false);
   };
 
+  const openPlayerInfo = (rawPlayerId: string) => {
+    const parsed = Number(rawPlayerId);
+    if (!Number.isFinite(parsed)) {
+      setError("Invalid player id");
+      return;
+    }
+    setProfilePlayerId(parsed);
+  };
+
+  const closePlayerInfo = () => {
+    setProfilePlayerId(null);
+  };
+
   const handleRemovePick = (pick: DraftPick) => {
-    void apiDelete<DraftPicksResponse>(`/api/draft/picks/${pick.playerId}`, { roomId: ROOM_ID })
+    void apiDelete<DraftPicksResponse>(`/api/draft/picks/${pick.playerId}`, { roomId: DRAFT_ROOM_ID })
       .then((data) => setPicks(data.items))
       .catch((err: unknown) => {
         console.error(err);
@@ -447,7 +462,7 @@ export default function DraftPage() {
     void apiPost<DraftPicksResponse, DraftPickUpsertIn>(
       "/api/draft/picks",
       payload,
-      { roomId: ROOM_ID, rosterPlayers: rosterSlots }
+      { roomId: DRAFT_ROOM_ID, rosterPlayers: rosterSlots }
     )
       .then((data) => {
         setPicks(data.items);
@@ -478,7 +493,7 @@ export default function DraftPage() {
     void apiPost<DraftPicksResponse, DraftPickUpsertIn>(
       "/api/draft/picks",
       payload,
-      { roomId: ROOM_ID, rosterPlayers: rosterSlots }
+      { roomId: DRAFT_ROOM_ID, rosterPlayers: rosterSlots }
     )
       .then((data) => {
         setPicks(data.items);
@@ -590,7 +605,7 @@ export default function DraftPage() {
             className="rounded-xl border border-fuchsia-400/35 bg-fuchsia-500/12 px-4 py-2 text-xs font-black text-fuchsia-100 transition hover:bg-fuchsia-500/20"
             title="Recommendation popup will be connected later"
           >
-            ? PPA-DUN Recommendation
+            PPA-DUN Recommendation
           </button>
         </div>
       </FadeIn>
@@ -609,7 +624,6 @@ export default function DraftPage() {
                   {selectedA ? (
                     <>
                       <div className="flex items-center gap-2 text-xs text-white/80">
-                        <span className="text-sm">?</span>
                         <span className="rounded bg-emerald-500/25 px-1.5 py-0.5 font-black text-emerald-100">A</span>
                         <span className="truncate font-black text-white">{selectedA.name}</span>
                       </div>
@@ -631,7 +645,6 @@ export default function DraftPage() {
                   {selectedB ? (
                     <>
                       <div className="flex items-center gap-2 text-xs text-white/80">
-                        <span className="text-sm">?</span>
                         <span className="rounded bg-emerald-500/25 px-1.5 py-0.5 font-black text-emerald-100">B</span>
                         <span className="truncate font-black text-white">{selectedB.name}</span>
                       </div>
@@ -723,7 +736,15 @@ export default function DraftPage() {
                   >
                     <div className="text-white/45">{idx + 1}</div>
 
-                    <div className="font-semibold text-white">{player.name}</div>
+                    <div>
+                      <button
+                        type="button"
+                        onClick={() => openPlayerInfo(player.id)}
+                        className="rounded-md border border-transparent px-2 py-1 -mx-2 -my-1 font-semibold text-white transition hover:border-white/35 hover:bg-white/5 hover:text-amber-200 focus-visible:border-white/45 focus-visible:bg-white/10 focus-visible:outline-none"
+                      >
+                        {player.name}
+                      </button>
+                    </div>
 
                     <div>
                       <span className="rounded-lg bg-white/10 px-2 py-1 text-[11px] font-extrabold text-white/80">
@@ -850,6 +871,12 @@ export default function DraftPage() {
         playerA={selectedA}
         playerB={selectedB}
         onClose={() => setComparisonOpen(false)}
+      />
+
+      <PlayerInfoModal
+        open={profilePlayerId !== null}
+        playerId={profilePlayerId}
+        onClose={closePlayerInfo}
       />
     </div>
   );

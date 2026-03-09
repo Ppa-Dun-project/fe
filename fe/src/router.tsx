@@ -28,7 +28,6 @@ export const router = createBrowserRouter([
 
       { path: "login", element: <LoginPage /> },
 
-      // Protected
       {
         element: <ProtectedRoute />,
         children: [{ path: "my-team", element: <MyTeamPage /> }],

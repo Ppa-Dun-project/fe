@@ -66,3 +66,14 @@ a {
   border: 2px solid transparent;
   background-clip: padding-box;
 }
+
+/* Hide native number input arrows/spinners */
+.no-spinner {
+  -moz-appearance: textfield;
+}
+
+.no-spinner::-webkit-outer-spin-button,
+.no-spinner::-webkit-inner-spin-button {
+  -webkit-appearance: none;
+  margin: 0;
+}

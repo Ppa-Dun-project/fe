@@ -1,9 +1,11 @@
-export const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000";
+const RAW_API_BASE_URL = import.meta.env.VITE_API_BASE_URL?.trim() ?? "";
+export const API_BASE_URL = RAW_API_BASE_URL.replace(/\/+$/, "");
 
 type QueryValue = string | number | boolean | null | undefined;
 
 function buildUrl(path: string, params?: Record<string, QueryValue>) {
-  const base = `${API_BASE_URL}${path}`;
+  const normalizedPath = path.startsWith("/") ? path : `/${path}`;
+  const base = API_BASE_URL ? `${API_BASE_URL}${normalizedPath}` : normalizedPath;
   if (!params) return base;
 
   const query = new URLSearchParams();

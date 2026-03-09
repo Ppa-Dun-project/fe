@@ -6,10 +6,16 @@ import { isAuthed } from "../../lib/auth";
 type LeagueType = "standard" | "lite" | "custom";
 
 const presets = {
-  standard: { label: "Standard", budget: 260, players: 12, note: "$260 • 12 players" },
-  lite: { label: "Lite", budget: 200, players: 10, note: "$200 • 10 players" },
+  standard: { label: "Standard", budget: 260, players: 12, note: "$260 / 12 players" },
+  lite: { label: "Lite", budget: 200, players: 10, note: "$200 / 10 players" },
   custom: { label: "Custom", budget: 260, players: 12, note: "Set your own" },
 } as const;
+
+const INPUT_CLASS =
+  "mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition hover:border-white/30 focus:border-white/40 focus-visible:ring-2 focus-visible:ring-white/20 placeholder:text-white/40";
+
+const INPUT_CLASS_COMPACT =
+  "mt-2 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none transition hover:border-white/30 focus:border-white/40 focus-visible:ring-2 focus-visible:ring-white/20";
 
 function pill(active: boolean) {
   return [
@@ -27,14 +33,9 @@ export default function DraftSetupCard() {
   const authed = isAuthed();
 
   const [myTeam, setMyTeam] = useState<string>("");
-
-  // ✅ New: opponents count + dynamic names
-  const [opponentsCount, setOpponentsCount] = useState<number>(0); // 0 ~ 12
+  const [opponentsCount, setOpponentsCount] = useState<number>(0);
   const [opponentTeams, setOpponentTeams] = useState<string[]>([]);
-
   const [leagueType, setLeagueType] = useState<LeagueType>("standard");
-
-  // custom values
   const [customBudget, setCustomBudget] = useState<number>(260);
   const [customPlayers, setCustomPlayers] = useState<number>(12);
 
@@ -43,7 +44,7 @@ export default function DraftSetupCard() {
       return {
         budget: customBudget,
         players: customPlayers,
-        note: `$${customBudget} • ${customPlayers} players`,
+        note: `$${customBudget} / ${customPlayers} players`,
       };
     }
     return presets[leagueType];
@@ -67,14 +68,13 @@ export default function DraftSetupCard() {
   };
 
   const onStartDraft = () => {
-    const trimmedOppNames = opponentTeams.map((n) => n.trim());
+    const trimmedOppNames = opponentTeams.map((name) => name.trim());
 
-    // MVP: draft 설정 값을 로컬에 저장
     const draftConfig = {
       myTeamName: myTeam.trim(),
       opponentsCount,
-      oppTeamName: trimmedOppNames[0] ?? "", // ✅ backward-compatible (first opponent)
-      oppTeamNames: trimmedOppNames, // ✅ new: all opponents
+      oppTeamName: trimmedOppNames[0] ?? "",
+      oppTeamNames: trimmedOppNames,
       leagueType,
       budget: computed.budget,
       rosterPlayers: computed.players,
@@ -84,49 +84,39 @@ export default function DraftSetupCard() {
     localStorage.setItem("ppadun_draft_config", JSON.stringify(draftConfig));
 
     const target = "/players";
-
-    // 게스트면 로그인 유도
     if (!authed) {
       const redirect = encodeURIComponent(target);
       navigate(`/login?redirect=${redirect}`, { replace: true });
       return;
     }
-
     navigate(target);
   };
 
   return (
     <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-      {/* Header: logo left, text right, whole row centered */}
       <div className="flex items-center justify-center gap-3">
-        {/* Logo: no gray frame, crop nicely */}
         <div className="h-12 w-12 overflow-hidden rounded-2xl">
           <img src={logo} alt="Logo" className="h-full w-full object-cover" />
         </div>
-
         <div className="text-left">
           <div className="text-base font-black leading-tight text-white">Draft Setup</div>
         </div>
       </div>
 
-      {/* Form */}
       <div className="mt-5 space-y-4">
-        {/* My team */}
         <div>
           <label className="text-xs font-extrabold text-white/70">My team name</label>
           <input
             value={myTeam}
             onChange={(e) => setMyTeam(e.target.value)}
             placeholder="e.g., Black Sluggers"
-            className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/40 focus:border-white/25"
+            className={INPUT_CLASS}
           />
         </div>
 
-        {/* ✅ Opponents count + / - */}
         <div>
           <label className="text-xs font-extrabold text-white/70">
-            Participants (opponents){" "}
-            <span className="text-white/40">(max 12)</span>
+            Participants (opponents) <span className="text-white/40">(max 12)</span>
           </label>
 
           <div className="mt-2 flex items-center gap-2">
@@ -136,7 +126,7 @@ export default function DraftSetupCard() {
               className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 bg-black/30 text-white/80 hover:bg-white/5"
               aria-label="Decrease opponents"
             >
-              −
+              -
             </button>
 
             <input
@@ -145,7 +135,7 @@ export default function DraftSetupCard() {
               max={12}
               value={opponentsCount}
               onChange={(e) => applyOpponentsCount(Number(e.target.value || 0))}
-              className="w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none focus:border-white/25"
+              className={`${INPUT_CLASS} mt-0 no-spinner`}
             />
 
             <button
@@ -163,7 +153,6 @@ export default function DraftSetupCard() {
           </div>
         </div>
 
-        {/* ✅ Dynamic opponent team name fields */}
         {opponentsCount > 0 && (
           <div className="space-y-3">
             {opponentTeams.map((name, idx) => (
@@ -174,15 +163,14 @@ export default function DraftSetupCard() {
                 <input
                   value={name}
                   onChange={(e) => updateOpponentName(idx, e.target.value)}
-                  placeholder={`e.g., Team ${String.fromCharCode(66 + idx)}`} // Team B, C, D...
-                  className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/40 focus:border-white/25"
+                  placeholder={`e.g., Team ${String.fromCharCode(66 + idx)}`}
+                  className={INPUT_CLASS}
                 />
               </div>
             ))}
           </div>
         )}
 
-        {/* League type */}
         <div>
           <div className="text-xs font-extrabold text-white/70">League type</div>
           <div className="mt-2 flex gap-2">
@@ -192,7 +180,7 @@ export default function DraftSetupCard() {
               onClick={() => setLeagueType("standard")}
             >
               <div className="text-sm font-black text-white">Standard</div>
-              <div className="mt-1 text-xs text-white/60">$260 • 12 players</div>
+              <div className="mt-1 text-xs text-white/60">$260 / 12 players</div>
             </button>
 
             <button
@@ -201,7 +189,7 @@ export default function DraftSetupCard() {
               onClick={() => setLeagueType("lite")}
             >
               <div className="text-sm font-black text-white">Lite</div>
-              <div className="mt-1 text-xs text-white/60">$200 • 10 players</div>
+              <div className="mt-1 text-xs text-white/60">$200 / 10 players</div>
             </button>
 
             <button
@@ -215,7 +203,6 @@ export default function DraftSetupCard() {
           </div>
         </div>
 
-        {/* Custom controls */}
         {leagueType === "custom" && (
           <div className="grid grid-cols-2 gap-3">
             <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
@@ -225,7 +212,7 @@ export default function DraftSetupCard() {
                 min={1}
                 value={customBudget}
                 onChange={(e) => setCustomBudget(Number(e.target.value || 0))}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-white/25"
+                className={`${INPUT_CLASS_COMPACT} no-spinner`}
               />
             </div>
 
@@ -236,13 +223,12 @@ export default function DraftSetupCard() {
                 min={1}
                 value={customPlayers}
                 onChange={(e) => setCustomPlayers(Number(e.target.value || 0))}
-                className="mt-2 w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-sm text-white outline-none focus:border-white/25"
+                className={`${INPUT_CLASS_COMPACT} no-spinner`}
               />
             </div>
           </div>
         )}
 
-        {/* Summary */}
         <div className="grid grid-cols-2 gap-3">
           <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
             <div className="text-xs font-bold text-white/70">Budget ($)</div>
@@ -255,13 +241,12 @@ export default function DraftSetupCard() {
           </div>
         </div>
 
-        {/* CTA */}
         <button
           type="button"
           onClick={onStartDraft}
           className="mt-1 w-full rounded-2xl bg-white px-4 py-3 text-sm font-black text-black transition hover:translate-y-[-1px] hover:bg-white/90 active:translate-y-0"
         >
-          Start Draft →
+          Start Draft
         </button>
 
         {!authed && (

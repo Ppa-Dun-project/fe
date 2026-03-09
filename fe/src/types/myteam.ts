@@ -18,6 +18,8 @@ export type MyTeamPosFilter =
   | "2B"
   | "3B"
   | "SS"
+  | "OF"
+  | "UTIL"
   | "LF"
   | "RF"
   | "CF"
