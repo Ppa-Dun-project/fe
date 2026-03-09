@@ -112,7 +112,7 @@ export default function DraftRoomBoard({
                   </div>
 
                   <div className="space-y-2">
-                    {slotTemplate.map((slotPos, slotIndex) => {
+                    {slotTemplate.map((_, slotIndex) => {
                       const pick = teamPicks.find((p) => p.slotIndex === slotIndex);
                       const player = pick ? playersById[pick.playerId] : null;
 
@@ -140,8 +140,6 @@ export default function DraftRoomBoard({
                               {slotIndex + 1}. {player.name}
                             </div>
                             <div className="mt-1 flex items-center gap-2 text-[10px] text-white/55">
-                              <span>{slotPos}</span>
-                              <span>|</span>
                               <span>{player.team}</span>
                               <span>|</span>
                               <span>${pick.bid ?? "?"}</span>
@@ -155,7 +153,7 @@ export default function DraftRoomBoard({
                           key={`${team.id}-${slotIndex}`}
                           className="rounded-xl border border-dashed border-white/10 bg-black/15 px-3 py-2 text-[11px] text-white/25"
                         >
-                          {slotPos}
+                          Empty
                         </div>
                       );
                     })}

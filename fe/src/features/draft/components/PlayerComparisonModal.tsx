@@ -173,7 +173,7 @@ export default function PlayerComparisonModal({ open, playerA, playerB, onClose 
         onClick={onClose}
       />
 
-      <div className="relative mx-auto mt-5 w-[95%] max-w-5xl overflow-hidden rounded-3xl border border-fuchsia-400/30 bg-gradient-to-b from-[#141933] via-[#0d1224] to-[#080c18] shadow-[0_28px_100px_rgba(4,8,20,0.72)]">
+      <div className="relative mx-auto mt-5 w-[97%] max-w-6xl overflow-hidden rounded-3xl border border-fuchsia-400/30 bg-gradient-to-b from-[#141933] via-[#0d1224] to-[#080c18] shadow-[0_28px_100px_rgba(4,8,20,0.72)]">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_12%,rgba(244,63,94,0.14),transparent_36%),radial-gradient(circle_at_85%_16%,rgba(245,158,11,0.12),transparent_38%)]" />
         <div className="pointer-events-none absolute inset-0 opacity-30 [background-image:linear-gradient(to_right,transparent,rgba(255,255,255,0.08),transparent)] [background-size:140px_100%]" />
 
@@ -215,17 +215,17 @@ export default function PlayerComparisonModal({ open, playerA, playerB, onClose 
           </div>
 
           <section className="rounded-2xl border border-white/10 bg-gradient-to-b from-[#0d1223] to-[#090d19] p-4">
-            <div className="mb-3 grid grid-cols-[1fr_auto_1fr] gap-3 text-xs font-black uppercase tracking-wide text-white/45">
-              <div className="text-right">{playerA.name}</div>
-              <div>Stat</div>
-              <div>{playerB.name}</div>
+            <div className="mb-3 grid grid-cols-[minmax(0,1fr)_360px_minmax(0,1fr)] gap-4 text-xs font-black uppercase tracking-wide text-white/45">
+              <div className="text-left">{playerA.name}</div>
+              <div className="text-center">Stat</div>
+              <div className="text-right">{playerB.name}</div>
             </div>
 
             <div className="space-y-3">
               {rows.map((row) => (
-                <div key={row.key} className="grid grid-cols-[1fr_auto_1fr] items-center gap-3">
+                <div key={row.key} className="grid grid-cols-[minmax(0,1fr)_360px_minmax(0,1fr)] items-center gap-4">
                   <div>
-                    <div className="mb-1 text-right text-xs font-black text-white">{row.displayA}</div>
+                    <div className="mb-1 text-left text-xs font-black text-white">{row.displayA}</div>
                     <div className="h-3 rounded-full bg-white/10">
                       <div
                         className="h-full rounded-full bg-gradient-to-r from-rose-500 to-red-400"
@@ -234,23 +234,23 @@ export default function PlayerComparisonModal({ open, playerA, playerB, onClose 
                     </div>
                   </div>
 
-                  <div className="min-w-[230px] text-xs font-black">
-                    <div className="flex items-center justify-between gap-2">
-                      <span className={`${trendClass(row.trendA)} min-w-[72px] text-right tabular-nums`}>
+                  <div className="min-w-[360px] text-xs font-black">
+                    <div className="grid grid-cols-[92px_1fr_92px] items-center gap-3">
+                      <span className={`${trendClass(row.trendA)} text-right tabular-nums`}>
                         {row.deltaA} {trendIcon(row.trendA)}
                       </span>
                       <span className="text-center uppercase tracking-wide text-white/60">{row.label}</span>
-                      <span className={`${trendClass(row.trendB)} min-w-[72px] text-left tabular-nums`}>
+                      <span className={`${trendClass(row.trendB)} text-left tabular-nums`}>
                         {trendIcon(row.trendB)} {row.deltaB}
                       </span>
                     </div>
                   </div>
 
                   <div>
-                    <div className="mb-1 text-xs font-black text-white">{row.displayB}</div>
+                    <div className="mb-1 text-right text-xs font-black text-white">{row.displayB}</div>
                     <div className="h-3 rounded-full bg-white/10">
                       <div
-                        className="h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-400"
+                        className="ml-auto h-full rounded-full bg-gradient-to-r from-amber-500 to-orange-400"
                         style={{ width: `${row.barB}%` }}
                       />
                     </div>
@@ -339,10 +339,7 @@ export default function PlayerComparisonModal({ open, playerA, playerB, onClose 
           <section className="rounded-2xl border border-fuchsia-500/40 bg-gradient-to-b from-[#241445] to-[#1a1130] p-4">
             <div className="text-sm font-black text-fuchsia-100">AI Recommendation</div>
             <div className="mt-2 rounded-xl border border-fuchsia-400/25 bg-fuchsia-500/10 p-3 text-sm text-white/80">
-              AI recommendation API integration is not connected yet.
-              <div className="mt-1 text-xs text-white/60">
-                This panel is ready and will display model-generated pick guidance after API hookup.
-              </div>
+              Planned for development in V2.
             </div>
           </section>
         </div>
