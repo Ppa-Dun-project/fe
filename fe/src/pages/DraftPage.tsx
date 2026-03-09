@@ -265,6 +265,7 @@ export default function DraftPage() {
         myTeamName: localConfig.myTeamName ?? "My Team",
         oppTeamName: localConfig.oppTeamName ?? "Team A",
         opponentsCount: localConfig.opponentsCount ?? 5,
+        oppTeamNames: (localConfig.oppTeamNames ?? []).join(","),
         roomId: DRAFT_ROOM_ID,
       },
       controller.signal
