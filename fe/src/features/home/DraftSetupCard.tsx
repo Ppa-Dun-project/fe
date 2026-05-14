@@ -2,11 +2,16 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import logo from "../../assets/LOGO.png";
 import { isAuthed } from "../../lib/auth";
+import {
+  DEFAULT_ROSTER_SLOTS,
+  sumRosterSlots,
+} from "../draft/utils";
+import type { RosterSlotCounts, RosterSlotPosition } from "../../types/draft";
 
-type LeagueType = "standard" | "lite" | "custom";
+export type LeagueType = "AL" | "NL" | "custom";
 
 // 모달 안에서 재사용할 때 onSubmit 으로 동작을 override 한다.
-// (생략 시 기본 동작: localStorage 저장 + /draft?setup=1 로 navigate)
+// (생략 시 기본 동작: localStorage 저장 + /draft 로 navigate)
 // embedded=true 면 카드 wrapper(section, border, padding) 없이 폼 내용만 그린다.
 export type DraftSetupConfig = {
   myTeamName: string;
@@ -15,17 +20,12 @@ export type DraftSetupConfig = {
   leagueType: LeagueType;
   budget: number;
   rosterPlayers: number;
+  rosterSlots: RosterSlotCounts;
 };
 type Props = {
   onSubmit?: (config: DraftSetupConfig) => void;
   embedded?: boolean;
 };
-
-const presets = {
-  standard: { label: "Standard", budget: 260, players: 12, opponents: 11, note: "$260 / 12 players / 12 teams" },
-  lite: { label: "Lite", budget: 200, players: 10, opponents: 9, note: "$200 / 10 players / 10 teams" },
-  custom: { label: "Custom", budget: 260, players: 12, opponents: 0, note: "Set your own" },
-} as const;
 
 const INPUT_CLASS =
   "mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition hover:border-white/30 focus:border-white/40 focus-visible:ring-2 focus-visible:ring-white/20 placeholder:text-white/40";
@@ -49,46 +49,54 @@ function parseIntOr0(s: string): number {
   return Number.isNaN(n) ? 0 : n;
 }
 
-// Robust select-all on focus: deferred to next frame so mouse click positioning
-// doesn't deselect. Works for both tab focus and mouse click.
 function selectAllOnFocus(e: React.FocusEvent<HTMLInputElement>) {
   const target = e.currentTarget;
   requestAnimationFrame(() => target.select());
 }
 
 const OPPONENTS_MAX = 12;
-const ROSTER_MIN = 1;
-const ROSTER_MAX = 12;
 const BUDGET_MIN = 1;
+const SLOT_MIN = 0;
+const SLOT_MAX = 10;
+
+const POSITION_ORDER: RosterSlotPosition[] = [
+  "C", "1B", "2B", "3B", "SS", "OF", "UTIL", "SP", "RP", "BENCH",
+];
+
+// 사용자가 슬롯 합계를 정확히 이 값과 맞춰야 Start Draft 가 활성화된다.
+const TARGET_ROSTER_SIZE = sumRosterSlots(DEFAULT_ROSTER_SLOTS);
+
+const POSITION_LABEL: Record<RosterSlotPosition, string> = {
+  C: "C",
+  "1B": "1B",
+  "2B": "2B",
+  "3B": "3B",
+  SS: "SS",
+  OF: "OF",
+  UTIL: "UTIL",
+  SP: "SP",
+  RP: "RP",
+  BENCH: "BENCH",
+};
 
 export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {}) {
   const navigate = useNavigate();
   const authed = isAuthed();
 
   const [myTeam, setMyTeam] = useState<string>("");
-  const [opponentsCountStr, setOpponentsCountStr] = useState<string>("0");
-  const [oppTeamNames, setOppTeamNames] = useState<string[]>([]);
-  const [leagueType, setLeagueType] = useState<LeagueType>("standard");
-  const [customBudgetStr, setCustomBudgetStr] = useState<string>("260");
-  const [customPlayersStr, setCustomPlayersStr] = useState<string>("12");
+  const [opponentsCountStr, setOpponentsCountStr] = useState<string>("11");
+  const [oppTeamNames, setOppTeamNames] = useState<string[]>(
+    Array.from({ length: 11 }, () => "")
+  );
+  const [leagueType, setLeagueType] = useState<LeagueType>("AL");
+  const [budgetStr, setBudgetStr] = useState<string>("260");
+  const [rosterSlots, setRosterSlots] = useState<RosterSlotCounts>(DEFAULT_ROSTER_SLOTS);
 
-  // Derived, clamped numeric values — single source of truth for downstream logic
+  // Derived numbers
   const opponentsCount = clamp(parseIntOr0(opponentsCountStr), 0, OPPONENTS_MAX);
-  const customBudget = Math.max(BUDGET_MIN, parseIntOr0(customBudgetStr));
-  const customPlayers = clamp(parseIntOr0(customPlayersStr), ROSTER_MIN, ROSTER_MAX);
+  const budget = Math.max(BUDGET_MIN, parseIntOr0(budgetStr));
+  const rosterPlayers = useMemo(() => sumRosterSlots(rosterSlots), [rosterSlots]);
 
-  const computed = useMemo(() => {
-    if (leagueType === "custom") {
-      return {
-        budget: customBudget,
-        players: customPlayers,
-        note: `$${customBudget} / ${customPlayers} players`,
-      };
-    }
-    return presets[leagueType];
-  }, [leagueType, customBudget, customPlayers]);
-
-  // Sync oppTeamNames array with a given count (keep existing entries, pad/trim)
   const syncOppTeamNames = (count: number) => {
     setOppTeamNames((prev) => {
       if (count === prev.length) return prev;
@@ -97,29 +105,10 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
     });
   };
 
-  // Central update: set input string + sync names synchronously so UI stays in lockstep
   const updateOpponentsCount = (str: string) => {
     setOpponentsCountStr(str);
     const c = clamp(parseIntOr0(str), 0, OPPONENTS_MAX);
     syncOppTeamNames(c);
-  };
-
-  // In Custom mode, Roster Players drives both roster size and opponent count
-  // (matching Standard/Lite pattern where "N players = N teams"). Typing here
-  // immediately creates N opponent name boxes.
-  const updateCustomPlayers = (str: string) => {
-    setCustomPlayersStr(str);
-    const p = clamp(parseIntOr0(str), ROSTER_MIN, ROSTER_MAX);
-    // X players → X opponents (so user sees X name boxes matching their input)
-    updateOpponentsCount(String(p));
-  };
-
-  const applyLeagueType = (type: LeagueType) => {
-    setLeagueType(type);
-    // Custom preserves user's current opponents count; Standard/Lite apply preset
-    if (type !== "custom") {
-      updateOpponentsCount(String(presets[type].opponents));
-    }
   };
 
   const updateOppTeamName = (index: number, value: string) => {
@@ -130,28 +119,39 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
     });
   };
 
+  const adjustSlot = (pos: RosterSlotPosition, delta: number) => {
+    setRosterSlots((prev) => ({
+      ...prev,
+      [pos]: clamp((prev[pos] ?? 0) + delta, SLOT_MIN, SLOT_MAX),
+    }));
+  };
+
+  // 슬롯 합계가 정확히 TARGET_ROSTER_SIZE 와 일치해야 시작 가능.
+  const rosterDelta = rosterPlayers - TARGET_ROSTER_SIZE;
+  const canStart = rosterDelta === 0;
+
   const onStartDraft = () => {
+    if (!canStart) return;
     const config: DraftSetupConfig = {
       myTeamName: myTeam.trim() || "My Team",
       opponentsCount,
       oppTeamNames: oppTeamNames.map((name, i) => name.trim() || `Opponent ${i + 1}`),
       leagueType,
-      budget: computed.budget,
-      rosterPlayers: computed.players,
+      budget,
+      rosterPlayers,
+      rosterSlots,
     };
 
-    // 모달 컨텍스트에서는 onSubmit 으로 부모(DraftPage)가 state 를 직접 갱신한다.
     if (onSubmit) {
       onSubmit(config);
       return;
     }
 
-    // 기본 동작: ppadun_unsaved_draft 에 저장하고 /draft 로 이동.
     localStorage.setItem(
       "ppadun_unsaved_draft",
       JSON.stringify({ config, picks: [] })
     );
-    navigate("/draft?setup=1");
+    navigate("/draft");
   };
 
   const body = (
@@ -177,8 +177,40 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
         </div>
 
         <div>
+          <div className="text-xs font-extrabold text-white/70">League</div>
+          <div className="mt-2 flex gap-2">
+            <button
+              type="button"
+              className={pill(leagueType === "AL")}
+              onClick={() => setLeagueType("AL")}
+            >
+              <div className="text-sm font-black text-white">AL</div>
+              <div className="mt-1 text-xs text-white/60">American League only</div>
+            </button>
+
+            <button
+              type="button"
+              className={pill(leagueType === "NL")}
+              onClick={() => setLeagueType("NL")}
+            >
+              <div className="text-sm font-black text-white">NL</div>
+              <div className="mt-1 text-xs text-white/60">National League only</div>
+            </button>
+
+            <button
+              type="button"
+              className={pill(leagueType === "custom")}
+              onClick={() => setLeagueType("custom")}
+            >
+              <div className="text-sm font-black text-white">Custom</div>
+              <div className="mt-1 text-xs text-white/60">Both leagues</div>
+            </button>
+          </div>
+        </div>
+
+        <div>
           <label className="text-xs font-extrabold text-white/70">
-            Participants (opponents) <span className="text-white/40">(max 12)</span>
+            Participants (opponents) <span className="text-white/40">(max {OPPONENTS_MAX})</span>
           </label>
 
           <div className="mt-2 flex items-center gap-2">
@@ -212,8 +244,6 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
             </button>
           </div>
 
-          <div className="mt-1 text-xs text-white/50">Enter how many opponents you&apos;ll draft with.</div>
-
           {opponentsCount > 0 && (
             <div className="mt-3 space-y-2 rounded-2xl border border-white/10 bg-black/20 p-3">
               <div className="text-xs font-extrabold text-white/70">Opponent names</div>
@@ -234,89 +264,79 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
         </div>
 
         <div>
-          <div className="text-xs font-extrabold text-white/70">League type</div>
-          <div className="mt-2 flex gap-2">
-            <button
-              type="button"
-              className={pill(leagueType === "standard")}
-              onClick={() => applyLeagueType("standard")}
-            >
-              <div className="text-sm font-black text-white">Standard</div>
-              <div className="mt-1 text-xs text-white/60">$260 / 12 players / 12 teams</div>
-            </button>
-
-            <button
-              type="button"
-              className={pill(leagueType === "lite")}
-              onClick={() => applyLeagueType("lite")}
-            >
-              <div className="text-sm font-black text-white">Lite</div>
-              <div className="mt-1 text-xs text-white/60">$200 / 10 players / 10 teams</div>
-            </button>
-
-            <button
-              type="button"
-              className={pill(leagueType === "custom")}
-              onClick={() => applyLeagueType("custom")}
-            >
-              <div className="text-sm font-black text-white">Custom</div>
-              <div className="mt-1 text-xs text-white/60">Set your own</div>
-            </button>
-          </div>
+          <label className="text-xs font-extrabold text-white/70">Budget ($)</label>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={BUDGET_MIN}
+            value={budgetStr}
+            onFocus={selectAllOnFocus}
+            onChange={(e) => setBudgetStr(e.target.value)}
+            className={`${INPUT_CLASS} no-spinner`}
+          />
         </div>
 
-        {leagueType === "custom" && (
-          <div className="grid grid-cols-2 gap-3">
-            <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-              <div className="text-xs font-bold text-white/70">Budget ($)</div>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={BUDGET_MIN}
-                value={customBudgetStr}
-                onFocus={selectAllOnFocus}
-                onChange={(e) => setCustomBudgetStr(e.target.value)}
-                className={`${INPUT_CLASS_COMPACT} no-spinner`}
-              />
+        <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
+          <div className="flex items-center justify-between">
+            <div className="text-xs font-extrabold text-white/70">Roster slots by position</div>
+            <div className="text-xs font-black">
+              <span className="text-white/70">Total: </span>
+              <span className={canStart ? "text-emerald-300" : "text-rose-300"}>
+                {rosterPlayers}
+              </span>
+              <span className="text-white/40"> / {TARGET_ROSTER_SIZE}</span>
             </div>
+          </div>
 
-            <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-              <div className="text-xs font-bold text-white/70">
-                Roster players <span className="text-white/40">(max {ROSTER_MAX})</span>
+          <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-3">
+            {POSITION_ORDER.map((pos) => (
+              <div
+                key={pos}
+                className="flex items-center justify-between rounded-xl border border-white/10 bg-black/30 px-3 py-2"
+              >
+                <div className="text-xs font-black text-white/80">{POSITION_LABEL[pos]}</div>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => adjustSlot(pos, -1)}
+                    className="grid h-7 w-7 place-items-center rounded-lg border border-white/10 bg-black/30 text-white/80 hover:bg-white/5"
+                    aria-label={`Decrease ${pos}`}
+                  >
+                    -
+                  </button>
+                  <div className="min-w-6 text-center text-sm font-black text-white">
+                    {rosterSlots[pos]}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => adjustSlot(pos, 1)}
+                    className="grid h-7 w-7 place-items-center rounded-lg border border-white/10 bg-black/30 text-white/80 hover:bg-white/5"
+                    aria-label={`Increase ${pos}`}
+                  >
+                    +
+                  </button>
+                </div>
               </div>
-              <input
-                type="number"
-                inputMode="numeric"
-                min={ROSTER_MIN}
-                max={ROSTER_MAX}
-                value={customPlayersStr}
-                onFocus={selectAllOnFocus}
-                onChange={(e) => updateCustomPlayers(e.target.value)}
-                className={`${INPUT_CLASS_COMPACT} no-spinner`}
-              />
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-2 gap-3">
-          <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-            <div className="text-xs font-bold text-white/70">Budget ($)</div>
-            <div className="mt-2 text-2xl font-black text-white">{computed.budget}</div>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
-            <div className="text-xs font-bold text-white/70">Roster players</div>
-            <div className="mt-2 text-2xl font-black text-white">{computed.players}</div>
+            ))}
           </div>
         </div>
 
         <button
           type="button"
           onClick={onStartDraft}
-          className="mt-1 w-full rounded-2xl bg-white px-4 py-3 text-sm font-black text-black transition hover:translate-y-[-1px] hover:bg-white/90 active:translate-y-0"
+          disabled={!canStart}
+          className="mt-1 w-full rounded-2xl bg-white px-4 py-3 text-sm font-black text-black transition hover:-translate-y-px hover:bg-white/90 active:translate-y-0 disabled:cursor-not-allowed disabled:bg-white/30 disabled:hover:translate-y-0"
         >
           Start Draft
         </button>
+
+        {!canStart && (
+          <div className="text-center text-xs text-rose-300">
+            {rosterDelta < 0
+              ? `Add ${-rosterDelta} more roster slot${-rosterDelta === 1 ? "" : "s"} to reach ${TARGET_ROSTER_SIZE} players.`
+              : `Remove ${rosterDelta} roster slot${rosterDelta === 1 ? "" : "s"} to fit ${TARGET_ROSTER_SIZE} players.`}
+          </div>
+        )}
 
         {!authed && (
           <div className="text-center text-xs text-white/50">
