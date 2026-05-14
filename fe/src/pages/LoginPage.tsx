@@ -1,5 +1,6 @@
 // useNavigate: 페이지 이동 함수
 // useSearchParams: URL의 쿼리 파라미터(?foo=bar)를 읽는 훅
+import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 // Google OAuth 공통 훅
 import { useGoogleSignIn } from "../lib/googleAuth";
@@ -14,8 +15,10 @@ export default function LoginPage() {
   // useSearchParams: [현재 파라미터, 파라미터 변경 함수] 반환
   const [params] = useSearchParams();
 
-  // 에러 파라미터 (예: /login?error=unauthorized)
-  const error = params.get("error");
+  // URL 에러 파라미터 (예: /login?error=unauthorized)
+  const urlError = params.get("error");
+  // 런타임 인증 에러 (Google 로그인 실패 시)
+  const [authError, setAuthError] = useState<string | null>(null);
 
   // redirect 파라미터 읽고 디코딩 (없으면 기본값 "/")
   // decodeURIComponent: encodeURIComponent의 반대 (복원)
@@ -24,11 +27,17 @@ export default function LoginPage() {
     : "/";
 
   // useGoogleSignIn: Google 로그인 버튼을 렌더링하고 인증 흐름 처리
-  // - 콜백은 로그인 성공 시 실행됨
-  // - replace: true → 히스토리 교체 (뒤로가기로 로그인 페이지 복귀 방지)
-  const buttonRef = useGoogleSignIn(() => {
-    navigate(redirect, { replace: true });
-  });
+  // - onSuccess: 로그인 성공 시 실행 (replace: true → 뒤로가기로 로그인 페이지 복귀 방지)
+  // - onError: 실패 시 에러 메시지 받아 UI 표시
+  const buttonRef = useGoogleSignIn(
+    () => {
+      setAuthError(null);
+      navigate(redirect, { replace: true });
+    },
+    (msg) => setAuthError(msg),
+  );
+
+  const error = authError ?? urlError;
 
   return (
     <div className="mx-auto max-w-xl">

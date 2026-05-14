@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import logo from "../../assets/LOGO.png";
 import { useGoogleSignIn } from "../../lib/googleAuth";
@@ -5,11 +6,16 @@ import { useGoogleSignIn } from "../../lib/googleAuth";
 export default function SignInCard() {
   const navigate = useNavigate();
   const location = useLocation();
+  const [authError, setAuthError] = useState<string | null>(null);
 
-  const buttonRef = useGoogleSignIn(() => {
-    const redirect = location.pathname + location.search;
-    navigate(redirect === "/login" ? "/" : redirect, { replace: true });
-  });
+  const buttonRef = useGoogleSignIn(
+    () => {
+      setAuthError(null);
+      const redirect = location.pathname + location.search;
+      navigate(redirect === "/login" ? "/" : redirect, { replace: true });
+    },
+    (msg) => setAuthError(msg),
+  );
 
   return (
     <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
@@ -26,6 +32,12 @@ export default function SignInCard() {
         </div>
 
         <div ref={buttonRef} className="mt-6 w-full opacity-85 transition hover:opacity-100" />
+
+        {authError && (
+          <div className="mt-3 w-full rounded-2xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-200">
+            {authError}
+          </div>
+        )}
 
         <div className="mt-8 w-full border-t border-white/10 pt-6 text-left">
           <div className="text-xs font-black text-white/70">What you get with PPA-DUN:</div>
