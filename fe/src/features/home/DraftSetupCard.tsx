@@ -5,6 +5,22 @@ import { isAuthed } from "../../lib/auth";
 
 type LeagueType = "standard" | "lite" | "custom";
 
+// 모달 안에서 재사용할 때 onSubmit 으로 동작을 override 한다.
+// (생략 시 기본 동작: localStorage 저장 + /draft?setup=1 로 navigate)
+// embedded=true 면 카드 wrapper(section, border, padding) 없이 폼 내용만 그린다.
+export type DraftSetupConfig = {
+  myTeamName: string;
+  opponentsCount: number;
+  oppTeamNames: string[];
+  leagueType: LeagueType;
+  budget: number;
+  rosterPlayers: number;
+};
+type Props = {
+  onSubmit?: (config: DraftSetupConfig) => void;
+  embedded?: boolean;
+};
+
 const presets = {
   standard: { label: "Standard", budget: 260, players: 12, opponents: 11, note: "$260 / 12 players / 12 teams" },
   lite: { label: "Lite", budget: 200, players: 10, opponents: 9, note: "$200 / 10 players / 10 teams" },
@@ -45,7 +61,7 @@ const ROSTER_MIN = 1;
 const ROSTER_MAX = 12;
 const BUDGET_MIN = 1;
 
-export default function DraftSetupCard() {
+export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {}) {
   const navigate = useNavigate();
   const authed = isAuthed();
 
@@ -115,8 +131,7 @@ export default function DraftSetupCard() {
   };
 
   const onStartDraft = () => {
-    // 옵션 A: 서버에 즉시 세션을 만들지 않는다. 폼 값을 ppadun_unsaved_draft 에 저장하고 /draft 로 이동.
-    const config = {
+    const config: DraftSetupConfig = {
       myTeamName: myTeam.trim() || "My Team",
       opponentsCount,
       oppTeamNames: oppTeamNames.map((name, i) => name.trim() || `Opponent ${i + 1}`),
@@ -125,17 +140,22 @@ export default function DraftSetupCard() {
       rosterPlayers: computed.players,
     };
 
+    // 모달 컨텍스트에서는 onSubmit 으로 부모(DraftPage)가 state 를 직접 갱신한다.
+    if (onSubmit) {
+      onSubmit(config);
+      return;
+    }
+
+    // 기본 동작: ppadun_unsaved_draft 에 저장하고 /draft 로 이동.
     localStorage.setItem(
       "ppadun_unsaved_draft",
       JSON.stringify({ config, picks: [] })
     );
-
-    const target = "/draft?setup=1";
-    navigate(target);
+    navigate("/draft?setup=1");
   };
 
-  return (
-    <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+  const body = (
+    <>
       <div className="flex items-center justify-center gap-3">
         <div className="h-12 w-12 overflow-hidden rounded-2xl">
           <img src={logo} alt="Logo" className="h-full w-full object-cover" />
@@ -304,6 +324,13 @@ export default function DraftSetupCard() {
           </div>
         )}
       </div>
+    </>
+  );
+
+  if (embedded) return body;
+  return (
+    <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+      {body}
     </section>
   );
 }

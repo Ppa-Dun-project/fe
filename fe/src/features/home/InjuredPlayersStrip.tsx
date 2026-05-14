@@ -50,8 +50,8 @@ export default function InjuredPlayersStrip() {
           </button>
         </div>
 
-        {/* 3카드 가로 (sm 이상에서는 3열, 모바일은 1열로 자연스럽게 떨어짐) */}
-        <div className="mt-5 grid grid-cols-1 gap-4 sm:grid-cols-3">
+        {/* 우측 1/3 컬럼에 들어가므로 항상 세로 1열 stack */}
+        <div className="mt-5 grid grid-cols-1 gap-4">
           {top3.map((p) => (
             <InjuredPlayerCard key={p.player_id} item={p} />
           ))}

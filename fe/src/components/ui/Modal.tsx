@@ -21,15 +21,15 @@ export default function Modal({ open, title, onClose, children, footer }: Props)
   if (!open) return null;
 
   return (
-    <div className="fixed inset-0 z-50">
-      {/* overlay */}
+    <div className="fixed inset-0 z-50 overflow-y-auto">
+      {/* overlay — fixed so it stays put while the panel scrolls */}
       <button
         aria-label="Close modal"
-        className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+        className="fixed inset-0 bg-black/70 backdrop-blur-sm"
         onClick={onClose}
       />
-      {/* panel */}
-      <div className="relative mx-auto mt-20 w-[92%] max-w-2xl rounded-2xl border border-white/10 bg-zinc-950 p-6 shadow-2xl">
+      {/* panel — vertical margin lets long content scroll within the viewport */}
+      <div className="relative mx-auto my-10 w-[92%] max-w-2xl rounded-2xl border border-white/10 bg-zinc-950 p-6 shadow-2xl">
         <div className="flex items-start justify-between gap-4">
           <div>
             {title && <h3 className="text-lg font-semibold text-white">{title}</h3>}
