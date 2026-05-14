@@ -6,8 +6,6 @@ import { useNavigate } from "react-router-dom";
 // 공통 UI 컴포넌트
 import FadeIn from "../components/ui/FadeIn";          // 페이드 인 애니메이션 래퍼
 import NewsCard from "../features/home/NewsCard";      // 뉴스 카드 컴포넌트
-import DraftSetupCard from "../features/home/DraftSetupCard"; // 드래프트 설정 카드 (로그인 시)
-import SignInCard from "../features/home/SignInCard";        // 로그인 유도 카드 (비로그인 시)
 import InjuredPlayersStrip from "../features/home/InjuredPlayersStrip"; // 부상 선수 strip + popup
 import type { NewsItem } from "../types/home";
 
@@ -33,18 +31,15 @@ const extractImageUrl = (html: string | undefined): string | undefined =>
 
 // 히어로 배너 배경 이미지
 import baseballImg from "../assets/Baseball.jpg";
-// 로그인 상태 실시간 추적 훅
-import { useAuth } from "../lib/auth";
 
 /**
  * HomePage: 랜딩 페이지
  * - 상단: 히어로 배너 + 검색창
  * - 좌측: 최신 뉴스 카드 3개
- * - 우측: 비로그인 → 로그인 유도 카드 / 로그인 → 드래프트 설정 카드
+ * - 우측: 부상 선수 명단
  */
 export default function HomePage() {
   const navigate = useNavigate();
-  const authed = useAuth();                    // 로그인 상태 (실시간 반영)
   const [query, setQuery] = useState("");      // 히어로 검색창 입력값
   const [news, setNews] = useState<NewsItem[]>([]);
 
@@ -147,11 +142,11 @@ export default function HomePage() {
         </section>
       </FadeIn>
 
-      {/* 뉴스 + 사이드 카드 2열 그리드 */}
+      {/* 뉴스 + 부상 선수 2열 그리드 */}
       {/* grid-cols-1: 기본 1열 / lg:grid-cols-3: 큰 화면에서 3열 */}
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
-        {/* 뉴스 + 부상자 섹션 (3열 중 2열 차지, 세로 stack) */}
-        <FadeIn className="space-y-6 lg:col-span-2" delayMs={60}>
+        {/* 좌측 뉴스 섹션 (3열 중 2열 차지) */}
+        <FadeIn className="lg:col-span-2" delayMs={60}>
           <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
             <div className="flex items-end justify-between gap-3">
               <div>
@@ -179,15 +174,11 @@ export default function HomePage() {
               ))}
             </div>
           </section>
-
-          {/* 부상 선수 섹션 — News 바로 아래, 같은 col-span-2 안 (오른쪽 사이드 카드와 나란히) */}
-          <InjuredPlayersStrip />
         </FadeIn>
 
-        {/* 사이드 카드 (3열 중 1열) */}
+        {/* 우측 부상 선수 섹션 (3열 중 1열) */}
         <FadeIn className="lg:col-span-1" delayMs={120}>
-          {/* 삼항 연산자로 로그인 상태에 따라 다른 카드 표시 */}
-          {authed ? <DraftSetupCard /> : <SignInCard />}
+          <InjuredPlayersStrip />
         </FadeIn>
       </div>
     </div>

@@ -55,6 +55,9 @@ import TakenBidModal from "../features/draft/components/TakenBidModal";
 import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
 import PlayerInfoModal from "../features/players/components/PlayerInfoModal";
 import Pagination from "../features/players/components/Pagination";
+import Modal from "../components/ui/Modal";
+import DraftSetupCard, { type DraftSetupConfig } from "../features/home/DraftSetupCard";
+import LoginPromptModal from "../features/auth/LoginPromptModal";
 
 const PAGE_SIZE = 30;
 
@@ -243,8 +246,11 @@ export default function DraftPage() {
   const isLoadedMode = sessionId !== null && Number.isFinite(sessionId);
 
   const [searchParams] = useSearchParams();
-  const useStoredDraftConfig = searchParams.get("setup") === "1";
   const draftRoomTopRef = useRef<HTMLDivElement | null>(null); // Scroll target after draft pick
+
+  // "Start Your Draft" 버튼이 띄우는 setup / 로그인 유도 모달.
+  const [setupModalOpen, setSetupModalOpen] = useState(false);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
 
   // 핵심 드래프트 state — 마운트 시 한 번 채워지고 이후 모든 픽 변경은 React state 만 갱신.
   const [config, setConfig] = useState<DraftConfigServer | null>(null);
@@ -406,6 +412,56 @@ export default function DraftPage() {
     setTakenTarget(null);
   };
 
+  // Start Your Draft 모달에서 입력한 config 로 page state 를 갱신.
+  // localStorage 도 함께 저장해 새로고침해도 resume 되도록 한다.
+  const handleSetupSubmit = (next: DraftSetupConfig) => {
+    const config: DraftConfigServer = {
+      leagueType: next.leagueType,
+      budget: next.budget,
+      rosterPlayers: next.rosterPlayers,
+      myTeamName: next.myTeamName,
+      opponentsCount: next.opponentsCount,
+      oppTeamNames: next.oppTeamNames,
+    };
+    try {
+      localStorage.setItem(
+        UNSAVED_DRAFT_KEY,
+        JSON.stringify({ config, picks: [] } satisfies UnsavedDraft)
+      );
+    } catch {
+      // 쿼터 초과 등은 조용히 무시.
+    }
+    setConfig(config);
+    setTeams(buildTeamsFromConfig(config));
+    setPicks([]);
+    setHasDraftConfig(true);
+    setSetupModalOpen(false);
+  };
+
+  // 비로그인이면 로그인 모달, 로그인 상태면 setup 모달.
+  const openStartDraft = () => {
+    if (authed) {
+      setSetupModalOpen(true);
+    } else {
+      setLoginModalOpen(true);
+    }
+  };
+
+  // 진행 중인 미저장 draft 폐기 — localStorage 비우고 player browser 상태로 복귀.
+  // 저장된 세션(isLoadedMode)은 이 버튼 자체가 노출되지 않으므로 분기 필요 없음.
+  const handleDiscardDraft = () => {
+    if (!window.confirm("Discard the current draft? This cannot be undone.")) return;
+    try {
+      localStorage.removeItem(UNSAVED_DRAFT_KEY);
+    } catch {
+      // ignore
+    }
+    setConfig(DEFAULT_DRAFT_CONFIG);
+    setTeams(buildTeamsFromConfig(DEFAULT_DRAFT_CONFIG));
+    setPicks([]);
+    setHasDraftConfig(false);
+  };
+
   // 마운트 분기:
   //  - sessionId 있음(로드 모드): GET /api/draft/sessions/{id}. 404 → 홈.
   //  - setup=1 있음(새 드래프트 모드): localStorage["ppadun_unsaved_draft"] 읽음.
@@ -439,16 +495,14 @@ export default function DraftPage() {
       return () => controller.abort();
     }
 
-    // 미저장 모드 — Draft Setup에서 온 경우에만 localStorage 설정을 사용한다.
-    // Navbar/direct URL 진입은 player browser로 취급해 이전 unsaved draft를 자동 복원하지 않는다.
+    // 미저장 모드 — localStorage에 unsaved draft가 있으면 자동 resume.
+    // 없으면 default config로 player browser 모드 (Start Your Draft 버튼 노출).
     let parsed: UnsavedDraft | null = null;
-    if (useStoredDraftConfig) {
-      try {
-        const raw = localStorage.getItem(UNSAVED_DRAFT_KEY);
-        if (raw) parsed = JSON.parse(raw) as UnsavedDraft;
-      } catch {
-        parsed = null;
-      }
+    try {
+      const raw = localStorage.getItem(UNSAVED_DRAFT_KEY);
+      if (raw) parsed = JSON.parse(raw) as UnsavedDraft;
+    } catch {
+      parsed = null;
     }
 
     const ready: UnsavedDraft = parsed?.config
@@ -462,7 +516,7 @@ export default function DraftPage() {
       setSessionName(null);
       setBootstrapped(true);
     });
-  }, [isLoadedMode, navigate, sessionId, useStoredDraftConfig]);
+  }, [isLoadedMode, navigate, sessionId]);
 
   // 미저장 모드에서 picks 가 바뀔 때마다 localStorage 에도 sync — 새로고침 보호.
   useEffect(() => {
@@ -779,6 +833,16 @@ export default function DraftPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            {hasDraftConfig && !isLoadedMode && (
+              <button
+                type="button"
+                onClick={handleDiscardDraft}
+                className="rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm font-black text-rose-200 transition hover:bg-rose-500/20"
+                title="Discard the current unsaved draft and start over"
+              >
+                Discard
+              </button>
+            )}
             {authed && (
               <>
                 {hasDraftConfig && (
@@ -826,17 +890,22 @@ export default function DraftPage() {
               onRemovePick={handleRemovePick}
             />
           ) : (
-            <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-              <div className="text-lg font-black text-white">
-                {authed ? "Default View" : "Guest View"}
+            <section className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
+              <div className="text-2xl font-black text-white">
+                Ready to draft?
               </div>
               <div className="mt-2 text-sm text-white/60">
                 {authed
-                  ? "No saved draft session yet. Start from Draft Setup to create one."
-                  : hasDraftConfig
-                  ? "Sign in to use the live draft room board and Add / Taken actions."
-                  : "Start from Draft Setup to create a live draft board."}
+                  ? "Set up your league to start the live draft board."
+                  : "Sign in and set up your league to start the live draft board."}
               </div>
+              <button
+                type="button"
+                onClick={openStartDraft}
+                className="mt-6 inline-flex items-center justify-center rounded-2xl bg-white px-8 py-4 text-base font-black text-black transition hover:-translate-y-px hover:bg-white/90 active:translate-y-0"
+              >
+                Start Your Draft
+              </button>
             </section>
           )}
         </div>
@@ -1324,6 +1393,19 @@ export default function DraftPage() {
         </div>
       )}
 
+      <Modal
+        open={setupModalOpen}
+        title="Start Your Draft"
+        onClose={() => setSetupModalOpen(false)}
+      >
+        <DraftSetupCard embedded onSubmit={handleSetupSubmit} />
+      </Modal>
+
+      <LoginPromptModal
+        open={loginModalOpen}
+        onClose={() => setLoginModalOpen(false)}
+        onAuthSuccess={() => setSetupModalOpen(true)}
+      />
     </div>
   );
 }
