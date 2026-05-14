@@ -954,19 +954,27 @@ export default function DraftPage() {
                   type="button"
                   onClick={undoPicks}
                   disabled={!canUndoPicks}
-                  className="rounded-2xl border border-white/15 bg-black/25 px-4 py-3 text-sm font-black text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-black/25"
+                  aria-label="Undo"
+                  className="grid h-12 w-12 place-items-center rounded-2xl border border-white/15 bg-black/25 text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-black/25"
                   title="Undo the last pick change"
                 >
-                  Undo
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+                    <path d="M9 14l-4-4 4-4" />
+                    <path d="M5 10h11a4 4 0 0 1 0 8h-2" />
+                  </svg>
                 </button>
                 <button
                   type="button"
                   onClick={redoPicks}
                   disabled={!canRedoPicks}
-                  className="rounded-2xl border border-white/15 bg-black/25 px-4 py-3 text-sm font-black text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-black/25"
+                  aria-label="Redo"
+                  className="grid h-12 w-12 place-items-center rounded-2xl border border-white/15 bg-black/25 text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-black/25"
                   title="Redo the last undone change"
                 >
-                  Redo
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5} strokeLinecap="round" strokeLinejoin="round" className="h-5 w-5">
+                    <path d="M15 14l4-4-4-4" />
+                    <path d="M19 10H8a4 4 0 0 0 0 8h2" />
+                  </svg>
                 </button>
               </>
             )}
