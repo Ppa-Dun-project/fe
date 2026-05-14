@@ -42,9 +42,10 @@ import {
   calculateRemainingBudget,
   clampRosterSize,
   draftCostClass,
-  findAvailableSlotIndex,
+  findEligibleSlotIndex,
   formatAvg,
   getPlayerDraftStatus,
+  isEligibleForSlot,
   mlbTeamBadgeClass,
   sumRosterSlots,
 } from "../features/draft/utils";
@@ -57,6 +58,8 @@ import PlayerComparisonModal from "../features/draft/components/PlayerComparison
 import PlayerInfoModal from "../features/players/components/PlayerInfoModal";
 import Pagination from "../features/players/components/Pagination";
 import Modal from "../components/ui/Modal";
+import Toast, { type ToastMessage, type ToastVariant } from "../components/ui/Toast";
+import { useUndoStack } from "../hooks/useUndoStack";
 import DraftSetupCard, { type DraftSetupConfig } from "../features/home/DraftSetupCard";
 import LoginPromptModal from "../features/auth/LoginPromptModal";
 
@@ -254,11 +257,34 @@ export default function DraftPage() {
   const [setupModalOpen, setSetupModalOpen] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
 
+  // Toast queue. id 는 monotonic counter 로 부여한다.
+  const toastIdRef = useRef(0);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const pushToast = (text: string, variant: ToastVariant = "info") => {
+    toastIdRef.current += 1;
+    const id = toastIdRef.current;
+    setToasts((prev) => [...prev, { id, text, variant }]);
+  };
+  const dismissToast = (id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
   // 핵심 드래프트 state — 마운트 시 한 번 채워지고 이후 모든 픽 변경은 React state 만 갱신.
   const [config, setConfig] = useState<DraftConfigServer | null>(null);
   const [hasDraftConfig, setHasDraftConfig] = useState(false);
   const [teams, setTeams] = useState<DraftTeam[]>([]);
-  const [picks, setPicks] = useState<DraftPick[]>([]);
+  // picks 는 useUndoStack 으로 관리해 undo / redo 를 지원한다.
+  //   - commitPicks: 사용자 행동에 의한 변경 (영입/제거/슬롯 이동) → 이력에 push
+  //   - resetPicks:  세션 전환 / 새 draft 시작 등 이력을 끊는 변경
+  const {
+    state: picks,
+    commit: commitPicks,
+    reset: resetPicks,
+    undo: undoPicks,
+    redo: redoPicks,
+    canUndo: canUndoPicks,
+    canRedo: canRedoPicks,
+  } = useUndoStack<DraftPick[]>([]);
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
 
@@ -444,7 +470,7 @@ export default function DraftPage() {
     }
     setConfig(config);
     setTeams(buildTeamsFromConfig(config));
-    setPicks([]);
+    resetPicks([]);
     setHasDraftConfig(true);
     setSetupModalOpen(false);
   };
@@ -469,7 +495,7 @@ export default function DraftPage() {
     }
     setConfig(DEFAULT_DRAFT_CONFIG);
     setTeams(buildTeamsFromConfig(DEFAULT_DRAFT_CONFIG));
-    setPicks([]);
+    resetPicks([]);
     setHasDraftConfig(false);
   };
 
@@ -492,7 +518,7 @@ export default function DraftPage() {
           setConfig(data.config);
           setHasDraftConfig(true);
           setTeams(data.teams);
-          setPicks(normalizeDraftPicks(data.picks ?? []));
+          resetPicks(normalizeDraftPicks(data.picks ?? []));
           setSessionName(data.name);
           setBootstrapped(true);
         })
@@ -523,7 +549,7 @@ export default function DraftPage() {
       setConfig(ready.config);
       setHasDraftConfig(Boolean(parsed?.config));
       setTeams(buildTeamsFromConfig(ready.config));
-      setPicks(normalizeDraftPicks(ready.picks ?? []));
+      resetPicks(normalizeDraftPicks(ready.picks ?? []));
       setSessionName(null);
       setBootstrapped(true);
     });
@@ -670,7 +696,68 @@ export default function DraftPage() {
 
   // 픽 제거 — 서버 호출 없이 React state 만 갱신. 미저장 모드면 localStorage sync 는 별도 effect 에서.
   const handleRemovePick = (pick: DraftPick) => {
-    setPicks((prev) => prev.filter((p) => p.playerId !== pick.playerId));
+    commitPicks((prev) => prev.filter((p) => p.playerId !== pick.playerId));
+  };
+
+  // 내 팀 보드 안에서 드래그로 슬롯을 옮길 때:
+  //   - 대상이 비어 있으면 자격(isEligibleForSlot) 만 만족하면 이동
+  //   - 대상이 차 있으면 양방향 자격(둘 다 상대 슬롯에 들어갈 수 있음)일 때만 swap
+  //   - 그 외에는 toast 로 사유 설명
+  const handleSlotReassign = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    const myTeamId = myTeam?.id;
+    if (!myTeamId) return;
+
+    const fromSlotPos = slotTemplate[fromIndex];
+    const toSlotPos = slotTemplate[toIndex];
+    if (!fromSlotPos || !toSlotPos) return;
+
+    const myPicks = picks.filter((p) => p.draftedByTeamId === myTeamId);
+    const fromPick = myPicks.find((p) => p.slotIndex === fromIndex);
+    if (!fromPick) return;
+    const fromPlayer = playersById[fromPick.playerId];
+    if (!fromPlayer) return;
+
+    if (!isEligibleForSlot(fromPlayer.positions, toSlotPos)) {
+      pushToast(`${fromPlayer.name} is not eligible for ${toSlotPos}.`, "error");
+      return;
+    }
+
+    const toPick = myPicks.find((p) => p.slotIndex === toIndex);
+
+    // Empty target → simple move.
+    if (!toPick) {
+      commitPicks((prev) =>
+        prev.map((p) =>
+          p.playerId === fromPick.playerId
+            ? { ...p, slotIndex: toIndex, slotPos: toSlotPos as DraftPosition }
+            : p
+        )
+      );
+      return;
+    }
+
+    // Occupied target → swap only when both directions are eligible.
+    const toPlayer = playersById[toPick.playerId];
+    if (!toPlayer) return;
+    if (!isEligibleForSlot(toPlayer.positions, fromSlotPos)) {
+      pushToast(
+        `Can't swap: ${toPlayer.name} is not eligible for ${fromSlotPos}.`,
+        "error"
+      );
+      return;
+    }
+    commitPicks((prev) =>
+      prev.map((p) => {
+        if (p.playerId === fromPick.playerId) {
+          return { ...p, slotIndex: toIndex, slotPos: toSlotPos as DraftPosition };
+        }
+        if (p.playerId === toPick.playerId) {
+          return { ...p, slotIndex: fromIndex, slotPos: fromSlotPos as DraftPosition };
+        }
+        return p;
+      })
+    );
   };
 
   // 옵션 A: 픽 추가 시 클라이언트가 즉시 slotIndex 결정.
@@ -686,15 +773,23 @@ export default function DraftPage() {
     const occupied = new Set(
       filtered.filter((p) => p.draftedByTeamId === draftedByTeamId).map((p) => p.slotIndex)
     );
-    const slotIndex = findAvailableSlotIndex(rosterSize, occupied);
+    const player = playersById[playerId];
+    const slotIndex = findEligibleSlotIndex(
+      player?.positions,
+      slotTemplate,
+      occupied
+    );
     if (slotIndex === -1) {
-      alert("No roster slot available");
+      pushToast(
+        `No eligible roster slot for ${player?.name ?? "this player"}.`,
+        "error"
+      );
       return false;
     }
 
     const slotPos = (slotTemplate[slotIndex] ?? "BENCH") as DraftPosition;
     const next: DraftPick = { playerId, draftedByTeamId, slotIndex, slotPos, bid, type };
-    setPicks([...filtered, next]);
+    commitPicks([...filtered, next]);
     return true;
   };
 
@@ -853,6 +948,28 @@ export default function DraftPage() {
           </div>
 
           <div className="flex items-center gap-2">
+            {hasDraftConfig && (
+              <>
+                <button
+                  type="button"
+                  onClick={undoPicks}
+                  disabled={!canUndoPicks}
+                  className="rounded-2xl border border-white/15 bg-black/25 px-4 py-3 text-sm font-black text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-black/25"
+                  title="Undo the last pick change"
+                >
+                  Undo
+                </button>
+                <button
+                  type="button"
+                  onClick={redoPicks}
+                  disabled={!canRedoPicks}
+                  className="rounded-2xl border border-white/15 bg-black/25 px-4 py-3 text-sm font-black text-white/80 transition hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-black/25"
+                  title="Redo the last undone change"
+                >
+                  Redo
+                </button>
+              </>
+            )}
             {hasDraftConfig && !isLoadedMode && (
               <button
                 type="button"
@@ -907,7 +1024,9 @@ export default function DraftPage() {
               currentRound={currentRound}
               totalRounds={rosterSize}
               authed={authed}
+              myTeamId={myTeam?.id ?? null}
               onRemovePick={handleRemovePick}
+              onSlotReassign={handleSlotReassign}
             />
           ) : (
             <section className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
@@ -1426,6 +1545,8 @@ export default function DraftPage() {
         onClose={() => setLoginModalOpen(false)}
         onAuthSuccess={() => setSetupModalOpen(true)}
       />
+
+      <Toast toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

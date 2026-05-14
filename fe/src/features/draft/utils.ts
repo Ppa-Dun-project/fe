@@ -123,6 +123,42 @@ export function draftCostClass(authed: boolean) {
 }
 
 /**
+ * 선수의 positions 가 해당 슬롯의 position 에 대해 자격을 가지는지 확인.
+ *   BENCH: 누구든 OK
+ *   UTIL:  비투수면 OK (positions 에 SP/RP 만 있으면 불가)
+ *   그 외 (C, 1B, 2B, 3B, SS, OF, SP, RP): 정확히 매칭
+ */
+export function isEligibleForSlot(
+  playerPositions: readonly string[] | undefined,
+  slotPos: string
+): boolean {
+  if (slotPos === "BENCH") return true;
+  const positions = playerPositions ?? [];
+  if (slotPos === "UTIL") {
+    return positions.some((p) => p !== "SP" && p !== "RP");
+  }
+  return positions.includes(slotPos);
+}
+
+/**
+ * occupied 가 아닌 슬롯 중 player 자격에 맞는 첫 인덱스를 반환.
+ * 자격 매칭 우선 순위는 slotTemplate 의 등장 순서(SP, RP, C, 1B, ... BENCH).
+ * → 본인 고유 포지션이 비어 있으면 그쪽 먼저, 아니면 UTIL/BENCH 로 fallback.
+ * 없으면 -1.
+ */
+export function findEligibleSlotIndex(
+  playerPositions: readonly string[] | undefined,
+  slotTemplate: readonly string[],
+  occupied: Set<number>
+): number {
+  for (let i = 0; i < slotTemplate.length; i += 1) {
+    if (occupied.has(i)) continue;
+    if (isEligibleForSlot(playerPositions, slotTemplate[i])) return i;
+  }
+  return -1;
+}
+
+/**
  * rosterPlayers 만큼 자른 SLOT_TEMPLATE_BASE 에서 occupied 슬롯을 제외한 첫 빈 자리 인덱스.
  * 전부 차 있으면 -1 반환.
  */
