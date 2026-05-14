@@ -30,6 +30,7 @@ import type {
   DraftPositionFilter,
   DraftSort,
   DraftTeam,
+  PlayerNote,
   SessionDetail,
   SessionSummary,
 } from "../types/draft";
@@ -55,6 +56,7 @@ import DraftRoomBoard from "../features/draft/components/DraftRoomBoard";
 import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
 import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
+import PlayerNotePopover from "../features/draft/components/PlayerNotePopover";
 import PlayerInfoModal from "../features/players/components/PlayerInfoModal";
 import Pagination from "../features/players/components/Pagination";
 import Modal from "../components/ui/Modal";
@@ -319,6 +321,11 @@ export default function DraftPage() {
   const [addTarget, setAddTarget] = useState<DraftPlayer | null>(null);
   const [takenTarget, setTakenTarget] = useState<DraftPlayer | null>(null);
 
+  // 메모 — playerId → note. 로드 모드에서만 fetch/저장 동작 (세션 ID 필요).
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [noteTarget, setNoteTarget] = useState<DraftPlayer | null>(null);
+  const [noteSaving, setNoteSaving] = useState(false);
+
   // Save / Import 모달
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveNameInput, setSaveNameInput] = useState("");
@@ -448,6 +455,41 @@ export default function DraftPage() {
     setTakenTarget(null);
   };
 
+  // 메모 팝오버 — 로드된 세션에서만 사용 가능 (미저장 모드는 버튼 자체가 비활성화됨).
+  const openNoteModal = (player: DraftPlayer) => {
+    setNoteTarget(player);
+  };
+
+  const closeNoteModal = () => {
+    if (noteSaving) return;
+    setNoteTarget(null);
+  };
+
+  const handleNoteSave = (note: string) => {
+    if (!noteTarget || sessionId === null) return;
+    const playerId = noteTarget.id;
+    const trimmed = note.trim();
+    setNoteSaving(true);
+    apiPutAuth<{ status: string }, { note: string }>(
+      `/api/draft/sessions/${sessionId}/notes/${encodeURIComponent(playerId)}`,
+      { note: trimmed }
+    )
+      .then(() => {
+        setNotes((prev) => {
+          const next = { ...prev };
+          if (trimmed) next[playerId] = trimmed;
+          else delete next[playerId];
+          return next;
+        });
+        setNoteTarget(null);
+      })
+      .catch((err: unknown) => {
+        console.error(err);
+        pushToast("Failed to save note", "error");
+      })
+      .finally(() => setNoteSaving(false));
+  };
+
   // Start Your Draft 모달에서 입력한 config 로 page state 를 갱신.
   // localStorage 도 함께 저장해 새로고침해도 resume 되도록 한다.
   const handleSetupSubmit = (next: DraftSetupConfig) => {
@@ -554,6 +596,32 @@ export default function DraftPage() {
       setBootstrapped(true);
     });
   }, [isLoadedMode, navigate, sessionId]);
+
+  // 로드 모드에서만 메모를 서버에서 가져온다. 미저장 모드는 세션 ID가 없어 메모를 못 저장하므로 fetch도 안 함.
+  useEffect(() => {
+    if (!isLoadedMode || sessionId === null) {
+      queueMicrotask(() => setNotes({}));
+      return;
+    }
+    const controller = new AbortController();
+    apiGetAuth<{ items: PlayerNote[] }>(
+      `/api/draft/sessions/${sessionId}/notes`,
+      undefined,
+      controller.signal
+    )
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        const map: Record<string, string> = {};
+        for (const it of data.items ?? []) map[it.playerId] = it.note;
+        setNotes(map);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setNotes({});
+      });
+    return () => controller.abort();
+  }, [isLoadedMode, sessionId]);
 
   // 미저장 모드에서 picks 가 바뀔 때마다 localStorage 에도 sync — 새로고침 보호.
   useEffect(() => {
@@ -1267,13 +1335,45 @@ export default function DraftPage() {
                   >
                     <div className="text-white/45">{(page - 1) * PAGE_SIZE + idx + 1}</div>
 
-                    <div>
+                    <div className="flex items-center gap-1">
                       <button
                         type="button"
                         onClick={() => openPlayerInfo(player.id, player.playerType)}
                         className="rounded-md border border-transparent px-2 py-1 -mx-2 -my-1 font-semibold text-white transition hover:border-white/35 hover:bg-white/5 hover:text-amber-200 focus-visible:border-white/45 focus-visible:bg-white/10 focus-visible:outline-none"
                       >
                         {player.name}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!authed || !isLoadedMode}
+                        onClick={() => openNoteModal(player)}
+                        aria-label={notes[player.id] ? "Edit note" : "Add note"}
+                        title={
+                          !authed
+                            ? "Sign in required"
+                            : !isLoadedMode
+                            ? "Save your draft first to add notes"
+                            : notes[player.id]
+                            ? "Edit note"
+                            : "Add note"
+                        }
+                        className={[
+                          "grid h-7 w-7 place-items-center rounded-md border transition",
+                          notes[player.id]
+                            ? "border-amber-400/50 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"
+                            : "border-white/10 bg-white/5 text-white/55 hover:bg-white/10 hover:text-white/80",
+                          (!authed || !isLoadedMode) && "cursor-not-allowed opacity-40 hover:bg-white/5",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                          <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+                          <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z" />
+                          <path d="M9 9h1" />
+                          <path d="M9 13h6" />
+                          <path d="M9 17h6" />
+                        </svg>
                       </button>
                     </div>
 
@@ -1423,6 +1523,17 @@ export default function DraftPage() {
         playerType={profilePlayerType}
         onClose={closePlayerInfo}
       />
+
+      {noteTarget && (
+        <PlayerNotePopover
+          open={true}
+          playerName={noteTarget.name}
+          initialNote={notes[noteTarget.id] ?? ""}
+          saving={noteSaving}
+          onSave={handleNoteSave}
+          onClose={closeNoteModal}
+        />
+      )}
 
       {saveModalOpen && (
         <div className="fixed inset-0 z-[80] grid place-items-center p-4">
