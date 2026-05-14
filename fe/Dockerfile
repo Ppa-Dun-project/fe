@@ -3,6 +3,10 @@ WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .
+# VITE_* env vars are baked into the JS bundle at build time.
+# Pass via `docker build --build-arg VITE_GOOGLE_CLIENT_ID=...` (CI uses GH Secret).
+ARG VITE_GOOGLE_CLIENT_ID
+ENV VITE_GOOGLE_CLIENT_ID=$VITE_GOOGLE_CLIENT_ID
 RUN npm run build
 
 FROM nginx:alpine
