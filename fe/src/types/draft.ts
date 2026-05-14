@@ -12,6 +12,7 @@ export type DraftPlayerPublic = {
   hr: number | null;             // 홈런
   rbi: number | null;            // 타점
   sb: number | null;             // 도루
+  ab: number | null;             // 타석
   w: number | null;
   sv: number | null;
   so: number | null;
