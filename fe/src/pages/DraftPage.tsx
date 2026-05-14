@@ -36,8 +36,8 @@ import type {
 type DraftPosition = DraftPlayer["positions"][number];
 
 import {
-  SLOT_TEMPLATE_BASE,
-  buildSlotTemplate,
+  DEFAULT_ROSTER_SLOTS,
+  buildSlotTemplateFromCounts,
   calculateCurrentRound,
   calculateRemainingBudget,
   clampRosterSize,
@@ -46,6 +46,7 @@ import {
   formatAvg,
   getPlayerDraftStatus,
   mlbTeamBadgeClass,
+  sumRosterSlots,
 } from "../features/draft/utils";
 import { formatPpa, ppaValueClass } from "../utils/playerValue";
 
@@ -171,12 +172,13 @@ type SessionsListResponse = {
 const UNSAVED_DRAFT_KEY = "ppadun_unsaved_draft";
 
 const DEFAULT_DRAFT_CONFIG: DraftConfigServer = {
-  leagueType: "standard",
+  leagueType: "AL",
   budget: 260,
-  rosterPlayers: 12,
+  rosterPlayers: sumRosterSlots(DEFAULT_ROSTER_SLOTS),
   myTeamName: "My Team",
   opponentsCount: 11,
   oppTeamNames: Array.from({ length: 11 }, (_, i) => `Opponent ${i + 1}`),
+  rosterSlots: DEFAULT_ROSTER_SLOTS,
 };
 
 // 미저장 모드의 localStorage 페이로드 — DraftSetupCard 가 쓰고 DraftPage 가 읽음
@@ -298,11 +300,19 @@ export default function DraftPage() {
   const [saving, setSaving] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
 
-  const rosterSlots = useMemo(
+  const rosterSize = useMemo(
     () => clampRosterSize(config?.rosterPlayers),
     [config?.rosterPlayers]
   );
-  const slotTemplate = useMemo(() => buildSlotTemplate(rosterSlots), [rosterSlots]);
+  // 옛 세션엔 rosterSlots 가 없을 수 있으므로 기본값 fallback.
+  const rosterSlotCounts = useMemo(
+    () => config?.rosterSlots ?? DEFAULT_ROSTER_SLOTS,
+    [config?.rosterSlots]
+  );
+  const slotTemplate = useMemo(
+    () => buildSlotTemplateFromCounts(rosterSlotCounts),
+    [rosterSlotCounts]
+  );
 
   // 공개 선수 목록 + 인증 값 목록을 playerId 로 머지한 최종 UI 목록
   const allPlayers = useMemo<DraftPlayer[]>(
@@ -390,8 +400,8 @@ export default function DraftPage() {
 
   const currentRound = useMemo(() => {
     if (teams.length === 0) return 1;
-    return calculateCurrentRound(teams.length, rosterSlots, picks);
-  }, [teams.length, rosterSlots, picks]);
+    return calculateCurrentRound(teams.length, rosterSize, picks);
+  }, [teams.length, rosterSize, picks]);
 
   const selectedA = players.find((player) => player.id === compareAId) ?? null;
   const selectedB = players.find((player) => player.id === compareBId) ?? null;
@@ -422,6 +432,7 @@ export default function DraftPage() {
       myTeamName: next.myTeamName,
       opponentsCount: next.opponentsCount,
       oppTeamNames: next.oppTeamNames,
+      rosterSlots: next.rosterSlots,
     };
     try {
       localStorage.setItem(
@@ -531,7 +542,12 @@ export default function DraftPage() {
     }
   }, [isLoadedMode, bootstrapped, config, hasDraftConfig, picks]);
 
-  // 공개 선수 목록 — 한 번만 호출. 검색/필터/정렬/페이지네이션은 아래 useMemo 에서 처리.
+  // 공개 선수 목록 — leagueType 이 바뀌면 다시 불러온다.
+  // AL/NL 은 ?league= 쿼리로 백엔드 필터링, 그 외(custom 등)는 전체.
+  const leagueQuery =
+    config?.leagueType === "AL" || config?.leagueType === "NL"
+      ? config.leagueType
+      : null;
   useEffect(() => {
     const controller = new AbortController();
     queueMicrotask(() => {
@@ -539,7 +555,11 @@ export default function DraftPage() {
       setError(null);
     });
 
-    apiGet<DraftPlayersResponse>("/api/draft/players", undefined, controller.signal)
+    const path = leagueQuery
+      ? `/api/draft/players?league=${leagueQuery}`
+      : "/api/draft/players";
+
+    apiGet<DraftPlayersResponse>(path, undefined, controller.signal)
       .then((data) => {
         if (controller.signal.aborted) return;
         setPublicPlayers(data.items ?? []);
@@ -557,7 +577,7 @@ export default function DraftPage() {
       });
 
     return () => controller.abort();
-  }, []);
+  }, [leagueQuery]);
 
   // 인증된 사용자에게만 PPA 값 + 추천 bid 를 불러와 playerId 로 공개 목록과 머지한다.
   // 로그아웃 시 값을 즉시 지워서 UI 에 남지 않도록 함.
@@ -666,13 +686,13 @@ export default function DraftPage() {
     const occupied = new Set(
       filtered.filter((p) => p.draftedByTeamId === draftedByTeamId).map((p) => p.slotIndex)
     );
-    const slotIndex = findAvailableSlotIndex(rosterSlots, occupied);
+    const slotIndex = findAvailableSlotIndex(rosterSize, occupied);
     if (slotIndex === -1) {
       alert("No roster slot available");
       return false;
     }
 
-    const slotPos = SLOT_TEMPLATE_BASE[slotIndex] as DraftPosition;
+    const slotPos = (slotTemplate[slotIndex] ?? "BENCH") as DraftPosition;
     const next: DraftPick = { playerId, draftedByTeamId, slotIndex, slotPos, bid, type };
     setPicks([...filtered, next]);
     return true;
@@ -823,7 +843,7 @@ export default function DraftPage() {
             </h1>
             {hasDraftConfig ? (
               <p className="mt-2 text-sm text-white/60">
-                {String(config.leagueType ?? "standard").toUpperCase()} - ${config.budget} Budget - {rosterSlots} Players
+                {String(config.leagueType ?? "AL").toUpperCase()} - ${config.budget} Budget - {rosterSize} Players
               </p>
             ) : (
               <p className="mt-2 text-sm text-white/60">
@@ -885,7 +905,7 @@ export default function DraftPage() {
               picks={picks}
               playersById={playersById}
               currentRound={currentRound}
-              totalRounds={rosterSlots}
+              totalRounds={rosterSize}
               authed={authed}
               onRemovePick={handleRemovePick}
             />

@@ -76,15 +76,17 @@ export type DraftConfigLocal = {
   myTeamName?: string;
   oppTeamNames?: string[];       // 상대 팀 이름들
   opponentsCount?: number;       // 상대 수
-  leagueType?: string;           // "standard" | "lite" | "custom"
+  leagueType?: string;           // "AL" | "NL" | "custom" (옛 세션은 "standard"|"lite" 가능 — fallback 처리)
   budget?: number;               // 예산 ($)
   rosterPlayers?: number;        // 로스터 인원
+  rosterSlots?: RosterSlotCounts; // 포지션별 슬롯 수
   createdAt?: string;            // 설정 생성 시간
 };
 
 /**
  * DraftConfigServer: 백엔드 세션 응답에 들어 있는 config 형태
  * - DraftConfigLocal 과 달리 모든 필드가 필수 (서버가 정규화한 값)
+ * - rosterSlots 는 옛 세션엔 없을 수 있어 선택적
  */
 export type DraftConfigServer = {
   leagueType: string;
@@ -93,7 +95,16 @@ export type DraftConfigServer = {
   myTeamName: string;
   opponentsCount: number;
   oppTeamNames: string[];
+  rosterSlots?: RosterSlotCounts;
 };
+
+/**
+ * RosterSlotCounts: Draft Setup 모달에서 사용자가 정한 포지션별 슬롯 수.
+ * 합계가 rosterPlayers 와 일치해야 Start Draft 가 활성화된다.
+ */
+export type RosterSlotPosition =
+  | "C" | "1B" | "2B" | "3B" | "SS" | "OF" | "UTIL" | "SP" | "RP" | "BENCH";
+export type RosterSlotCounts = Record<RosterSlotPosition, number>;
 
 /**
  * SessionSummary: GET /api/draft/sessions 의 각 항목 (Import 모달용)

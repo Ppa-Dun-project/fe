@@ -1,16 +1,40 @@
-import type { DraftConfigLocal, DraftPick, DraftTeam } from "../../types/draft";
+import type {
+  DraftConfigLocal,
+  DraftPick,
+  DraftTeam,
+  RosterSlotCounts,
+  RosterSlotPosition,
+} from "../../types/draft";
+
+/**
+ * 기본 14-슬롯 구성:
+ *   C, 1B, 2B, 3B, SS, OF×3, UTIL, SP×2, RP×2, BENCH×3
+ */
+export const DEFAULT_ROSTER_SLOTS: RosterSlotCounts = {
+  C: 1, "1B": 1, "2B": 1, "3B": 1, SS: 1,
+  OF: 3, UTIL: 1,
+  SP: 2, RP: 2,
+  BENCH: 3,
+};
+
+/** 합계 = rosterPlayers 가 되어야 한다는 검증용. */
+export function sumRosterSlots(slots: RosterSlotCounts): number {
+  return Object.values(slots).reduce((sum, n) => sum + n, 0);
+}
 
 export const DEFAULT_CONFIG = {
   myTeamName: "My Team",
   oppTeamNames: [] as string[],
   opponentsCount: 0,
-  leagueType: "standard",
+  leagueType: "AL",
   budget: 260,
-  rosterPlayers: 12,
+  rosterPlayers: sumRosterSlots(DEFAULT_ROSTER_SLOTS),
+  rosterSlots: DEFAULT_ROSTER_SLOTS,
 } satisfies DraftConfigLocal;
 
 // 옵션 A: 픽 추가 시 클라이언트가 즉시 slotIndex/slotPos 결정.
 // 슬롯 인덱스 → 포지션 매핑은 백엔드와 동일한 베이스 템플릿을 그대로 사용.
+// 옛 세션 (rosterSlots 없는 경우) 의 fallback 으로 남겨둠.
 export const SLOT_TEMPLATE_BASE = [
   "SP", "SP", "RP", "SP", "RP",
   "C", "1B", "2B", "3B", "SS",
@@ -18,6 +42,22 @@ export const SLOT_TEMPLATE_BASE = [
   "BENCH", "BENCH", "BENCH", "BENCH", "BENCH",
   "BENCH", "BENCH", "BENCH", "BENCH", "BENCH",
 ] as const;
+
+// rosterSlots 가 있을 때 사용할 동적 슬롯 빌더.
+// 순서: SP, RP, C, 1B, 2B, 3B, SS, OF, UTIL, BENCH
+// (Draft board 가 사용자가 정한 카운트대로 슬롯을 그리도록 한다.)
+const SLOT_ORDER: RosterSlotPosition[] = [
+  "SP", "RP", "C", "1B", "2B", "3B", "SS", "OF", "UTIL", "BENCH",
+];
+
+export function buildSlotTemplateFromCounts(slots: RosterSlotCounts): string[] {
+  const out: string[] = [];
+  for (const pos of SLOT_ORDER) {
+    const n = slots[pos] ?? 0;
+    for (let i = 0; i < n; i += 1) out.push(pos);
+  }
+  return out;
+}
 
 const TEAM_PALETTE = [
   { header: "border-rose-400/30 bg-rose-500/10 text-rose-200", slot: "border-rose-400/20 bg-rose-500/8", text: "text-rose-200" },
