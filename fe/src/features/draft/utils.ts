@@ -73,7 +73,7 @@ export function mlbTeamBadgeClass(team: string): string {
 
 /** Format batting average as ".300" (no leading zero). */
 export function formatAvg(avg: number | null) {
-  if (!avg) return "-";
+  if (avg === null || avg === undefined) return "-";
   return avg.toFixed(3).replace("0.", ".");
 }
 

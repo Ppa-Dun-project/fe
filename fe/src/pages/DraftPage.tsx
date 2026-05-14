@@ -108,9 +108,9 @@ function formatNumber(value: number | null | undefined, digits: number) {
 
 function formatDraftStatSummary(player: DraftPlayerPublic) {
   if (isPitcherOnly(player)) {
-    return `ERA ${formatNumber(player.era, 2)} | SO ${player.so ?? "-"} | W ${player.w ?? "-"} | SV ${player.sv ?? "-"}`;
+    return `ERA ${formatNumber(player.era, 2)} | SO ${player.so ?? "-"} | W ${player.w ?? "-"} | SV ${player.sv ?? "-"} | IP ${formatNumber(player.ip, 1)}`;
   }
-  return `AVG ${formatAvg(player.avg)} | HR ${player.hr ?? "-"} | RBI ${player.rbi ?? "-"} | SB ${player.sb ?? "-"}`;
+  return `AVG ${formatAvg(player.avg)} | HR ${player.hr ?? "-"} | RBI ${player.rbi ?? "-"} | SB ${player.sb ?? "-"} | AB ${player.ab ?? "-"}`;
 }
 
 function primaryRateSortValue(player: DraftPlayerPublic) {
@@ -235,12 +235,6 @@ function initialNameFor(currentName: string | null): string {
   return currentName;
 }
 
-function newestCreatedSession(sessions: SessionSummary[]) {
-  return [...sessions].sort(
-    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-  )[0];
-}
-
 export default function DraftPage() {
   const authed = useAuth();
   const navigate = useNavigate();
@@ -275,8 +269,8 @@ export default function DraftPage() {
   const showingPitcherColumns = isPitcherPositionFilter(position);
   const sortOptions = showingPitcherColumns ? PITCHER_SORT_OPTIONS : BATTER_SORT_OPTIONS;
   const statColumnLabels = showingPitcherColumns
-    ? ["ERA", "SO", "W", "SV"]
-    : ["AVG", "HR", "RBI", "SB"];
+    ? ["ERA", "SO", "W", "SV", "IP"]
+    : ["AVG", "HR", "RBI", "SB", "AB"];
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -414,7 +408,8 @@ export default function DraftPage() {
 
   // 마운트 분기:
   //  - sessionId 있음(로드 모드): GET /api/draft/sessions/{id}. 404 → 홈.
-  //  - sessionId 없음(미저장 모드): localStorage["ppadun_unsaved_draft"] 읽음. 없으면 홈.
+  //  - setup=1 있음(새 드래프트 모드): localStorage["ppadun_unsaved_draft"] 읽음.
+  //  - 둘 다 없으면 Default/Guest player browser로 시작하며 saved session은 Import로만 연다.
   // 이후 모든 픽 변경은 React state 에서만 처리되며 서버에 즉시 반영되지 않는다.
   useEffect(() => {
     if (isLoadedMode) {
@@ -444,44 +439,6 @@ export default function DraftPage() {
       return () => controller.abort();
     }
 
-    if (authed && !useStoredDraftConfig) {
-      const controller = new AbortController();
-      apiGetAuth<SessionsListResponse>(
-        "/api/draft/sessions",
-        undefined,
-        controller.signal
-      )
-        .then((data) => {
-          if (controller.signal.aborted) return;
-          const latestSession = newestCreatedSession(data.items ?? []);
-          if (latestSession) {
-            navigate(`/draft/${latestSession.id}`, { replace: true });
-            return;
-          }
-
-          const ready: UnsavedDraft = { config: DEFAULT_DRAFT_CONFIG, picks: [] };
-          setConfig(ready.config);
-          setHasDraftConfig(false);
-          setTeams(buildTeamsFromConfig(ready.config));
-          setPicks([]);
-          setSessionName(null);
-          setBootstrapped(true);
-        })
-        .catch((err: unknown) => {
-          if (err instanceof DOMException && err.name === "AbortError") return;
-          console.error(err);
-          const ready: UnsavedDraft = { config: DEFAULT_DRAFT_CONFIG, picks: [] };
-          setConfig(ready.config);
-          setHasDraftConfig(false);
-          setTeams(buildTeamsFromConfig(ready.config));
-          setPicks([]);
-          setSessionName(null);
-          setBootstrapped(true);
-        });
-
-      return () => controller.abort();
-    }
-
     // 미저장 모드 — Draft Setup에서 온 경우에만 localStorage 설정을 사용한다.
     // Navbar/direct URL 진입은 player browser로 취급해 이전 unsaved draft를 자동 복원하지 않는다.
     let parsed: UnsavedDraft | null = null;
@@ -505,7 +462,7 @@ export default function DraftPage() {
       setSessionName(null);
       setBootstrapped(true);
     });
-  }, [authed, isLoadedMode, navigate, sessionId, useStoredDraftConfig]);
+  }, [isLoadedMode, navigate, sessionId, useStoredDraftConfig]);
 
   // 미저장 모드에서 picks 가 바뀔 때마다 localStorage 에도 sync — 새로고침 보호.
   useEffect(() => {
@@ -1044,7 +1001,7 @@ export default function DraftPage() {
 
       <FadeIn delayMs={140}>
         <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5">
-          <div className="grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] bg-black/40 px-4 py-3 text-xs font-extrabold text-white/60">
+          <div className="grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] bg-black/40 px-4 py-3 text-xs font-extrabold text-white/60">
             <div>#</div>
             <div>Player</div>
             <div>Pos</div>
@@ -1054,6 +1011,7 @@ export default function DraftPage() {
             <div>{statColumnLabels[1]}</div>
             <div>{statColumnLabels[2]}</div>
             <div>{statColumnLabels[3]}</div>
+            <div>{statColumnLabels[4]}</div>
             <div>PPA-DUN Value</div>
             <div>Action</div>
             <div>Compare</div>
@@ -1085,7 +1043,7 @@ export default function DraftPage() {
                   <div
                     key={player.id}
                     className={[
-                      "grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] items-center px-4 py-3 text-sm text-white/85 transition",
+                      "grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] items-center px-4 py-3 text-sm text-white/85 transition",
                       compareActive
                         ? "relative z-[1] my-1 rounded-xl border border-emerald-400/75 bg-emerald-500/10 shadow-[0_0_18px_rgba(16,185,129,0.35)]"
                         : "hover:bg-white/5",
@@ -1133,6 +1091,9 @@ export default function DraftPage() {
                     </div>
                     <div className="font-semibold text-amber-300">
                       {isPitcherOnly(player) ? player.sv ?? "-" : player.sb ?? "-"}
+                    </div>
+                    <div className="text-white/70">
+                      {isPitcherOnly(player) ? formatNumber(player.ip, 1) : player.ab ?? "-"}
                     </div>
 
                     <div className={`font-black ${ppaValueClass(player.ppaValue, { authed })}`}>
