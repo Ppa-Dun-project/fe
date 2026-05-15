@@ -5,11 +5,11 @@
 // Option A 데이터 흐름:
 //   1. 마운트 분기:
 //      - useParams.sessionId 있음 → GET /api/draft/sessions/{id} → React state
-//      - sessionId 없음 → localStorage["ppadun_unsaved_draft"] → React state
+//      - sessionId 없음 → sessionStorage["ppadun_unsaved_draft"] → React state
 //      - 둘 다 없으면 홈으로 리다이렉트
 //   2. 공개 GET /api/draft/players → 선수 목록 (값 없음)
 //   3. POST /api/draft/players/values, body { config, picks } → 머지용 값
-//   4. 픽 추가/삭제는 React state 만 갱신. 미저장 모드면 localStorage 도 sync.
+//   4. 픽 추가/삭제는 React state 만 갱신. 미저장 모드면 sessionStorage 도 sync.
 //   5. Save 버튼만이 유일한 서버 커밋 포인트 (POST 또는 PUT /api/draft/sessions[/id]).
 //
 // Filtering, sorting, and pagination all run client-side on the merged list.
@@ -190,12 +190,30 @@ const DEFAULT_DRAFT_CONFIG: DraftConfigServer = {
   rosterSlots: DEFAULT_ROSTER_SLOTS,
 };
 
-// 미저장 모드의 localStorage 페이로드 — DraftSetupCard 가 쓰고 DraftPage 가 읽음
+// 미저장 모드의 sessionStorage 페이로드 — DraftSetupCard 가 쓰고 DraftPage 가 읽음.
+// 같은 탭에서 페이지 이동/새로고침 동안 유지되고, 창을 닫으면 브라우저가 지운다.
 type UnsavedDraft = {
   config: DraftConfigServer;
   picks: DraftPick[];
   notes?: Record<string, string>; // playerId → note (미저장 동안 클라이언트 보관)
 };
+
+function removeUnsavedDraftStorage() {
+  sessionStorage.removeItem(UNSAVED_DRAFT_KEY);
+  localStorage.removeItem(UNSAVED_DRAFT_KEY);
+}
+
+function readUnsavedDraftStorage() {
+  const current = sessionStorage.getItem(UNSAVED_DRAFT_KEY);
+  if (current) return current;
+
+  const legacy = localStorage.getItem(UNSAVED_DRAFT_KEY);
+  if (!legacy) return null;
+
+  sessionStorage.setItem(UNSAVED_DRAFT_KEY, legacy);
+  localStorage.removeItem(UNSAVED_DRAFT_KEY);
+  return legacy;
+}
 
 // 미저장 모드에서 config 만으로 teams 배열을 만든다.
 // 저장 시 서버가 자체 ID 로 다시 만들어 주므로 여기 ID 는 클라이언트 임시 키로만 사용.
@@ -489,7 +507,7 @@ export default function DraftPage() {
         return next;
       });
 
-    // 미저장 모드 — localStorage 동기화 effect 가 알아서 잡아가므로 여기서 state만 갱신.
+    // 미저장 모드 — sessionStorage 동기화 effect 가 알아서 잡아가므로 여기서 state만 갱신.
     if (sessionId === null) {
       applyLocal();
       setNoteTarget(null);
@@ -514,7 +532,7 @@ export default function DraftPage() {
   };
 
   // Start Your Draft 모달에서 입력한 config 로 page state 를 갱신.
-  // localStorage 도 함께 저장해 새로고침해도 resume 되도록 한다.
+  // sessionStorage 도 함께 저장해 같은 탭에서 이동/새로고침해도 resume 되도록 한다.
   const handleSetupSubmit = (next: DraftSetupConfig) => {
     const config: DraftConfigServer = {
       leagueType: next.leagueType,
@@ -526,7 +544,7 @@ export default function DraftPage() {
       rosterSlots: next.rosterSlots,
     };
     try {
-      localStorage.setItem(
+      sessionStorage.setItem(
         UNSAVED_DRAFT_KEY,
         JSON.stringify({ config, picks: [], notes: {} } satisfies UnsavedDraft)
       );
@@ -550,12 +568,12 @@ export default function DraftPage() {
     }
   };
 
-  // 진행 중인 미저장 draft 폐기 — localStorage 비우고 player browser 상태로 복귀.
+  // 진행 중인 미저장 draft 폐기 — sessionStorage 비우고 player browser 상태로 복귀.
   // 저장된 세션(isLoadedMode)은 이 버튼 자체가 노출되지 않으므로 분기 필요 없음.
   const handleDiscardDraft = () => {
     if (!window.confirm("Discard the current draft? This cannot be undone.")) return;
     try {
-      localStorage.removeItem(UNSAVED_DRAFT_KEY);
+      removeUnsavedDraftStorage();
     } catch {
       // ignore
     }
@@ -568,7 +586,7 @@ export default function DraftPage() {
 
   // 마운트 분기:
   //  - sessionId 있음(로드 모드): GET /api/draft/sessions/{id}. 404 → 홈.
-  //  - setup=1 있음(새 드래프트 모드): localStorage["ppadun_unsaved_draft"] 읽음.
+  //  - setup=1 있음(새 드래프트 모드): sessionStorage["ppadun_unsaved_draft"] 읽음.
   //  - 둘 다 없으면 Default/Guest player browser로 시작하며 saved session은 Import로만 연다.
   // 이후 모든 픽 변경은 React state 에서만 처리되며 서버에 즉시 반영되지 않는다.
   useEffect(() => {
@@ -599,11 +617,11 @@ export default function DraftPage() {
       return () => controller.abort();
     }
 
-    // 미저장 모드 — localStorage에 unsaved draft가 있으면 자동 resume.
+    // 미저장 모드 — sessionStorage에 unsaved draft가 있으면 자동 resume.
     // 없으면 default config로 player browser 모드 (Start Your Draft 버튼 노출).
     let parsed: UnsavedDraft | null = null;
     try {
-      const raw = localStorage.getItem(UNSAVED_DRAFT_KEY);
+      const raw = readUnsavedDraftStorage();
       if (raw) parsed = JSON.parse(raw) as UnsavedDraft;
     } catch {
       parsed = null;
@@ -623,7 +641,7 @@ export default function DraftPage() {
     });
   }, [isLoadedMode, navigate, sessionId]);
 
-  // 로드 모드 — 서버에서 메모를 가져온다. 미저장 모드는 부트스트랩 effect 가 localStorage 에서 채워주므로 여기선 건드리지 않음.
+  // 로드 모드 — 서버에서 메모를 가져온다. 미저장 모드는 부트스트랩 effect 가 sessionStorage 에서 채워주므로 여기선 건드리지 않음.
   useEffect(() => {
     if (!isLoadedMode || sessionId === null) return;
     const controller = new AbortController();
@@ -646,11 +664,11 @@ export default function DraftPage() {
     return () => controller.abort();
   }, [isLoadedMode, sessionId]);
 
-  // 미저장 모드에서 picks/notes 가 바뀔 때마다 localStorage 에도 sync — 새로고침 보호.
+  // 미저장 모드에서 picks/notes 가 바뀔 때마다 sessionStorage 에도 sync — 페이지 이동/새로고침 보호.
   useEffect(() => {
     if (isLoadedMode || !bootstrapped || !config || !hasDraftConfig) return;
     try {
-      localStorage.setItem(
+      sessionStorage.setItem(
         UNSAVED_DRAFT_KEY,
         JSON.stringify({ config, picks, notes } satisfies UnsavedDraft)
       );
@@ -1022,7 +1040,7 @@ export default function DraftPage() {
         }
 
         try {
-          localStorage.removeItem(UNSAVED_DRAFT_KEY);
+          removeUnsavedDraftStorage();
         } catch {
           // 무시
         }

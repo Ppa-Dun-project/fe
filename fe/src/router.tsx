@@ -30,7 +30,7 @@ export const router = createBrowserRouter([
       // 각 URL과 페이지 매핑
       { path: "news", element: <NewsPage /> },
 
-      // 미저장 드래프트 모드: localStorage 의 ppadun_unsaved_draft 사용
+      // 미저장 드래프트 모드: sessionStorage 의 ppadun_unsaved_draft 사용
       { path: "draft", element: <DraftPage /> },
       // 저장된 세션 모드: 서버에서 SessionDetail 재로드
       { path: "draft/:sessionId", element: <DraftPage /> },
