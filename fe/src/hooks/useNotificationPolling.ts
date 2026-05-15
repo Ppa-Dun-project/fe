@@ -1,18 +1,24 @@
 // 15초마다 백엔드 알림 폴링하는 훅.
-// - 첫 로드 시 lastSeenId가 없으면 가장 최근 알림 id만 기억하고 토스트는 안 띄움
-//   (몇 주치 알림이 한꺼번에 토스트로 폭주하는 거 방지)
-// - 그 이후엔 lastSeenId 이후의 모든 알림에 대해 onEvent 콜백 호출
-// - lastSeenId는 localStorage에 보관 → 페이지 닫았다 다시 열어도 catch-up
+//
+// 동작:
+// 1. 마운트 시 첫 호출 응답의 latest_id 로 lastSeen을 맞춤 → 그 시점 이전의 모든
+//    알림은 무시 (토스트 안 띄움).
+// 2. 그 이후 polling은 since=lastSeen 으로 새로 들어온 알림만 받아 onEvent 호출.
+//
+// localStorage catch-up은 의도적으로 안 함 — 사용자가 자는 동안 쌓인 알림을
+// 깨어나서 한꺼번에 토스트로 받는 게 오히려 불편하다는 피드백 반영.
 import { useEffect, useRef } from "react";
 
 import { apiGetAuth } from "../lib/api";
 import type { NotificationEvent } from "../types/notifications";
 
 const POLL_INTERVAL_MS = 15_000;
-const LAST_SEEN_KEY = "ppadun_notif_last_seen_id";
 const FETCH_LIMIT = 50;
 
-type Response = { items: NotificationEvent[] };
+type Response = {
+  items: NotificationEvent[];
+  latest_id: number;
+};
 
 export function useNotificationPolling(
   onEvent: (ev: NotificationEvent) => void,
@@ -29,42 +35,36 @@ export function useNotificationPolling(
     if (!enabled) return;
 
     let cancelled = false;
-    const stored = localStorage.getItem(LAST_SEEN_KEY);
-    let lastSeenId: number | null = stored !== null ? Number(stored) : null;
+    let lastSeenId: number | null = null;
 
     const tick = async () => {
       try {
-        const since = lastSeenId ?? 0;
         const data = await apiGetAuth<Response>(
           "/api/notifications/recent",
-          { since, limit: FETCH_LIMIT }
+          { since: lastSeenId ?? 0, limit: FETCH_LIMIT }
         );
         if (cancelled) return;
+
+        // 첫 호출: latest_id로 시작점 잡음, items는 무시.
+        if (lastSeenId === null) {
+          lastSeenId = data.latest_id;
+          return;
+        }
 
         const items = data.items ?? [];
         if (items.length === 0) return;
 
-        // 첫 응답이면 토스트 없이 lastSeen만 갱신 (초기 폭주 방지).
-        if (lastSeenId === null) {
-          const newestId = items[items.length - 1].id;
-          lastSeenId = newestId;
-          localStorage.setItem(LAST_SEEN_KEY, String(newestId));
-          return;
-        }
-
-        // 그 이후엔 각 새 이벤트마다 콜백.
         for (const ev of items) {
           onEventRef.current(ev);
           if (ev.id > lastSeenId) lastSeenId = ev.id;
         }
-        localStorage.setItem(LAST_SEEN_KEY, String(lastSeenId));
       } catch (err) {
         // 401, 5xx, 네트워크 끊김 등 — 다음 tick에 재시도하므로 조용히 처리.
         if (!cancelled) console.warn("notification polling failed:", err);
       }
     };
 
-    tick(); // 마운트 시 즉시 한 번
+    tick(); // 마운트 시 즉시 한 번 (lastSeen 초기화)
     const id = window.setInterval(tick, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;
