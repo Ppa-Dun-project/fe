@@ -771,8 +771,11 @@ export default function DraftPage() {
   // 인증된 사용자에게만 PPA 값 + 추천 bid 를 불러와 playerId 로 공개 목록과 머지한다.
   // 로그아웃 시 값을 즉시 지워서 UI 에 남지 않도록 함.
   // picks/config 가 바뀔 때마다 재호출 — 잔여 예산 변동에 따라 백엔드의 추천 bid 가 갱신되기 때문.
+  // hasDraftConfig 는 의도적으로 의존하지 않음 — 로그인만 하면 (Start Draft 누르기 전에도)
+  // PPA 값이 보여야 한다. 드래프트 시작 전엔 config 가 DEFAULT_DRAFT_CONFIG 로 채워져 있어서
+  // 백엔드가 기본 예산/로스터/상대수로 추천 bid 를 계산해 돌려준다.
   useEffect(() => {
-    if (!authed || !config || !hasDraftConfig) {
+    if (!authed || !config) {
       queueMicrotask(() => setPlayerValues(null));
       return;
     }
@@ -796,7 +799,7 @@ export default function DraftPage() {
       });
 
     return () => controller.abort();
-  }, [authed, config, hasDraftConfig, picks]);
+  }, [authed, config, picks]);
 
   // Toggle player selection for A/B comparison (max 2 players).
   const handleCompareToggle = (playerId: string) => {

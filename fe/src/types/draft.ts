@@ -8,17 +8,45 @@ export type DraftPlayerPublic = {
   playerType: "batter" | "pitcher" | "two_way";
   team: string;                  // MLB 팀 약어 (예: "NYY")
   positions: string[];           // 포지션 배열 (예: ["OF", "DH"])
-  avg: number | null;            // 타율
-  hr: number | null;             // 홈런
+
+  // ── 타자 스탯 ────────────────────────────────────────────────────────
+  ab: number | null;             // 타수
+  r: number | null;              // 득점 (타자) / 실점 (투수)
+  h: number | null;              // 안타 (타자) / 피안타 (투수)
+  single: number | null;         // 1루타
+  double: number | null;         // 2루타
+  triple: number | null;         // 3루타
+  hr: number | null;             // 홈런 (타자) / 피홈런 (투수)
   rbi: number | null;            // 타점
+  bb: number | null;             // 볼넷 (타자) / 볼넷 허용 (투수)
+  k: number | null;              // 삼진
   sb: number | null;             // 도루
-  ab: number | null;             // 타석
-  w: number | null;
-  sv: number | null;
-  so: number | null;
-  era: number | null;
-  whip: number | null;
-  ip: number | null;
+  cs: number | null;             // 도루 실패
+  avg: number | null;            // 타율
+  obp: number | null;            // 출루율
+  slg: number | null;            // 장타율
+
+  // ── 투수 스탯 (h, r, hr, bb 는 위와 공유 — 문맥에 따라 의미가 달라짐) ──
+  w: number | null;              // 승
+  l: number | null;              // 패
+  sv: number | null;             // 세이브
+  so: number | null;             // 탈삼진
+  era: number | null;            // 평균자책점
+  whip: number | null;           // WHIP
+  ip: number | null;             // 이닝 (소수점은 1/3 단위 표기 — 184.2 = 184 2/3)
+  g: number | null;              // 등판
+  gs: number | null;             // 선발 등판
+  war: number | null;            // WAR
+  fip: number | null;            // FIP
+  er: number | null;             // 자책점
+  hbp: number | null;            // 사구
+  bf: number | null;             // 상대 타자 수
+  era_plus: number | null;       // 조정 ERA (ERA+)
+  h9: number | null;             // 9이닝당 피안타
+  hr9: number | null;             // 9이닝당 피홈런
+  bb9: number | null;             // 9이닝당 볼넷
+  so9: number | null;             // 9이닝당 탈삼진
+  so_bb: number | null;           // K/BB 비율
 };
 
 /**
