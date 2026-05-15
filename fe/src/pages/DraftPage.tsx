@@ -31,6 +31,7 @@ import type {
   DraftPositionFilter,
   DraftSort,
   DraftTeam,
+  PlayerNote,
   SessionDetail,
   SessionSummary,
 } from "../types/draft";
@@ -59,6 +60,7 @@ import DraftRoomBoard from "../features/draft/components/DraftRoomBoard";
 import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
 import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
+import PlayerNotePopover from "../features/draft/components/PlayerNotePopover";
 import PlayerInfoModal from "../features/players/components/PlayerInfoModal";
 import Pagination from "../features/players/components/Pagination";
 import Modal from "../components/ui/Modal";
@@ -192,6 +194,7 @@ const DEFAULT_DRAFT_CONFIG: DraftConfigServer = {
 type UnsavedDraft = {
   config: DraftConfigServer;
   picks: DraftPick[];
+  notes?: Record<string, string>; // playerId → note (미저장 동안 클라이언트 보관)
 };
 
 // 미저장 모드에서 config 만으로 teams 배열을 만든다.
@@ -329,6 +332,11 @@ export default function DraftPage() {
   const [addTarget, setAddTarget] = useState<DraftPlayer | null>(null);
   const [takenTarget, setTakenTarget] = useState<DraftPlayer | null>(null);
 
+  // 메모 — playerId → note. 로드 모드에서만 fetch/저장 동작 (세션 ID 필요).
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [noteTarget, setNoteTarget] = useState<DraftPlayer | null>(null);
+  const [noteSaving, setNoteSaving] = useState(false);
+
   // Save / Import 모달
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveNameInput, setSaveNameInput] = useState("");
@@ -458,6 +466,53 @@ export default function DraftPage() {
     setTakenTarget(null);
   };
 
+  // 메모 팝오버 — 로드된 세션에서만 사용 가능 (미저장 모드는 버튼 자체가 비활성화됨).
+  const openNoteModal = (player: DraftPlayer) => {
+    setNoteTarget(player);
+  };
+
+  const closeNoteModal = () => {
+    if (noteSaving) return;
+    setNoteTarget(null);
+  };
+
+  const handleNoteSave = (note: string) => {
+    if (!noteTarget) return;
+    const playerId = noteTarget.id;
+    const trimmed = note.trim();
+
+    const applyLocal = () =>
+      setNotes((prev) => {
+        const next = { ...prev };
+        if (trimmed) next[playerId] = trimmed;
+        else delete next[playerId];
+        return next;
+      });
+
+    // 미저장 모드 — localStorage 동기화 effect 가 알아서 잡아가므로 여기서 state만 갱신.
+    if (sessionId === null) {
+      applyLocal();
+      setNoteTarget(null);
+      return;
+    }
+
+    // 저장된 세션 — 즉시 서버에 PUT.
+    setNoteSaving(true);
+    apiPutAuth<{ status: string }, { note: string }>(
+      `/api/draft/sessions/${sessionId}/notes/${encodeURIComponent(playerId)}`,
+      { note: trimmed }
+    )
+      .then(() => {
+        applyLocal();
+        setNoteTarget(null);
+      })
+      .catch((err: unknown) => {
+        console.error(err);
+        pushToast("Failed to save note", "error");
+      })
+      .finally(() => setNoteSaving(false));
+  };
+
   // Start Your Draft 모달에서 입력한 config 로 page state 를 갱신.
   // localStorage 도 함께 저장해 새로고침해도 resume 되도록 한다.
   const handleSetupSubmit = (next: DraftSetupConfig) => {
@@ -473,7 +528,7 @@ export default function DraftPage() {
     try {
       localStorage.setItem(
         UNSAVED_DRAFT_KEY,
-        JSON.stringify({ config, picks: [] } satisfies UnsavedDraft)
+        JSON.stringify({ config, picks: [], notes: {} } satisfies UnsavedDraft)
       );
     } catch {
       // 쿼터 초과 등은 조용히 무시.
@@ -481,6 +536,7 @@ export default function DraftPage() {
     setConfig(config);
     setTeams(buildTeamsFromConfig(config));
     resetPicks([]);
+    setNotes({});
     setHasDraftConfig(true);
     setSetupModalOpen(false);
   };
@@ -506,6 +562,7 @@ export default function DraftPage() {
     setConfig(DEFAULT_DRAFT_CONFIG);
     setTeams(buildTeamsFromConfig(DEFAULT_DRAFT_CONFIG));
     resetPicks([]);
+    setNotes({});
     setHasDraftConfig(false);
   };
 
@@ -560,23 +617,47 @@ export default function DraftPage() {
       setHasDraftConfig(Boolean(parsed?.config));
       setTeams(buildTeamsFromConfig(ready.config));
       resetPicks(normalizeDraftPicks(ready.picks ?? []));
+      setNotes(ready.notes ?? {});
       setSessionName(null);
       setBootstrapped(true);
     });
   }, [isLoadedMode, navigate, sessionId]);
 
-  // 미저장 모드에서 picks 가 바뀔 때마다 localStorage 에도 sync — 새로고침 보호.
+  // 로드 모드 — 서버에서 메모를 가져온다. 미저장 모드는 부트스트랩 effect 가 localStorage 에서 채워주므로 여기선 건드리지 않음.
+  useEffect(() => {
+    if (!isLoadedMode || sessionId === null) return;
+    const controller = new AbortController();
+    apiGetAuth<{ items: PlayerNote[] }>(
+      `/api/draft/sessions/${sessionId}/notes`,
+      undefined,
+      controller.signal
+    )
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        const map: Record<string, string> = {};
+        for (const it of data.items ?? []) map[it.playerId] = it.note;
+        setNotes(map);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setNotes({});
+      });
+    return () => controller.abort();
+  }, [isLoadedMode, sessionId]);
+
+  // 미저장 모드에서 picks/notes 가 바뀔 때마다 localStorage 에도 sync — 새로고침 보호.
   useEffect(() => {
     if (isLoadedMode || !bootstrapped || !config || !hasDraftConfig) return;
     try {
       localStorage.setItem(
         UNSAVED_DRAFT_KEY,
-        JSON.stringify({ config, picks } satisfies UnsavedDraft)
+        JSON.stringify({ config, picks, notes } satisfies UnsavedDraft)
       );
     } catch {
       // 쿼터 초과 등은 조용히 무시 — 새로고침 보호 실패해도 화면 동작에는 영향 없음.
     }
-  }, [isLoadedMode, bootstrapped, config, hasDraftConfig, picks]);
+  }, [isLoadedMode, bootstrapped, config, hasDraftConfig, picks, notes]);
 
   // 공개 선수 목록 — leagueType 이 바뀌면 다시 불러온다.
   // AL/NL 은 ?league= 쿼리로 백엔드 필터링, 그 외(custom 등)는 전체.
@@ -923,7 +1004,23 @@ export default function DraftPage() {
       "/api/draft/sessions",
       { name, config, picks }
     )
-      .then((data) => {
+      .then(async (data) => {
+        // 미저장 동안 쌓인 로컬 메모를 새 session_id 로 일괄 PUT.
+        // 개별 실패는 무시 — 메모는 부수 데이터이고, 세션 자체는 이미 성공했음.
+        const noteEntries = Object.entries(notes);
+        if (noteEntries.length > 0) {
+          await Promise.all(
+            noteEntries.map(([playerId, note]) =>
+              apiPutAuth<{ status: string }, { note: string }>(
+                `/api/draft/sessions/${data.id}/notes/${encodeURIComponent(playerId)}`,
+                { note }
+              ).catch((err: unknown) => {
+                console.error(`Failed to flush note for ${playerId}:`, err);
+              })
+            )
+          );
+        }
+
         try {
           localStorage.removeItem(UNSAVED_DRAFT_KEY);
         } catch {
@@ -1350,7 +1447,7 @@ export default function DraftPage() {
                   >
                     <div className="text-center text-white/45">{(page - 1) * PAGE_SIZE + idx + 1}</div>
 
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex items-center gap-1">
                       <button
                         type="button"
                         onClick={() => openPlayerInfo(player.id, player.playerType)}
@@ -1358,6 +1455,36 @@ export default function DraftPage() {
                         title={player.name}
                       >
                         {player.name}
+                      </button>
+                      <button
+                        type="button"
+                        disabled={!authed}
+                        onClick={() => openNoteModal(player)}
+                        aria-label={notes[player.id] ? "Edit note" : "Add note"}
+                        title={
+                          !authed
+                            ? "Sign in required"
+                            : notes[player.id]
+                            ? "Edit note"
+                            : "Add note"
+                        }
+                        className={[
+                          "grid h-7 w-7 place-items-center rounded-md border transition",
+                          notes[player.id]
+                            ? "border-amber-400/50 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"
+                            : "border-white/10 bg-white/5 text-white/55 hover:bg-white/10 hover:text-white/80",
+                          !authed && "cursor-not-allowed opacity-40 hover:bg-white/5",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                      >
+                        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4">
+                          <path d="M14 3v4a1 1 0 0 0 1 1h4" />
+                          <path d="M17 21H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h7l5 5v11a2 2 0 0 1-2 2Z" />
+                          <path d="M9 9h1" />
+                          <path d="M9 13h6" />
+                          <path d="M9 17h6" />
+                        </svg>
                       </button>
                     </div>
 
@@ -1505,6 +1632,17 @@ export default function DraftPage() {
         playerType={profilePlayerType}
         onClose={closePlayerInfo}
       />
+
+      {noteTarget && (
+        <PlayerNotePopover
+          open={true}
+          playerName={noteTarget.name}
+          initialNote={notes[noteTarget.id] ?? ""}
+          saving={noteSaving}
+          onSave={handleNoteSave}
+          onClose={closeNoteModal}
+        />
+      )}
 
       {saveModalOpen && (
         <div className="fixed inset-0 z-[80] grid place-items-center p-4">
