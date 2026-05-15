@@ -190,6 +190,7 @@ const DEFAULT_DRAFT_CONFIG: DraftConfigServer = {
 type UnsavedDraft = {
   config: DraftConfigServer;
   picks: DraftPick[];
+  notes?: Record<string, string>; // playerId → note (미저장 동안 클라이언트 보관)
 };
 
 // 미저장 모드에서 config 만으로 teams 배열을 만든다.
@@ -466,21 +467,33 @@ export default function DraftPage() {
   };
 
   const handleNoteSave = (note: string) => {
-    if (!noteTarget || sessionId === null) return;
+    if (!noteTarget) return;
     const playerId = noteTarget.id;
     const trimmed = note.trim();
+
+    const applyLocal = () =>
+      setNotes((prev) => {
+        const next = { ...prev };
+        if (trimmed) next[playerId] = trimmed;
+        else delete next[playerId];
+        return next;
+      });
+
+    // 미저장 모드 — localStorage 동기화 effect 가 알아서 잡아가므로 여기서 state만 갱신.
+    if (sessionId === null) {
+      applyLocal();
+      setNoteTarget(null);
+      return;
+    }
+
+    // 저장된 세션 — 즉시 서버에 PUT.
     setNoteSaving(true);
     apiPutAuth<{ status: string }, { note: string }>(
       `/api/draft/sessions/${sessionId}/notes/${encodeURIComponent(playerId)}`,
       { note: trimmed }
     )
       .then(() => {
-        setNotes((prev) => {
-          const next = { ...prev };
-          if (trimmed) next[playerId] = trimmed;
-          else delete next[playerId];
-          return next;
-        });
+        applyLocal();
         setNoteTarget(null);
       })
       .catch((err: unknown) => {
@@ -505,7 +518,7 @@ export default function DraftPage() {
     try {
       localStorage.setItem(
         UNSAVED_DRAFT_KEY,
-        JSON.stringify({ config, picks: [] } satisfies UnsavedDraft)
+        JSON.stringify({ config, picks: [], notes: {} } satisfies UnsavedDraft)
       );
     } catch {
       // 쿼터 초과 등은 조용히 무시.
@@ -513,6 +526,7 @@ export default function DraftPage() {
     setConfig(config);
     setTeams(buildTeamsFromConfig(config));
     resetPicks([]);
+    setNotes({});
     setHasDraftConfig(true);
     setSetupModalOpen(false);
   };
@@ -538,6 +552,7 @@ export default function DraftPage() {
     setConfig(DEFAULT_DRAFT_CONFIG);
     setTeams(buildTeamsFromConfig(DEFAULT_DRAFT_CONFIG));
     resetPicks([]);
+    setNotes({});
     setHasDraftConfig(false);
   };
 
@@ -592,17 +607,15 @@ export default function DraftPage() {
       setHasDraftConfig(Boolean(parsed?.config));
       setTeams(buildTeamsFromConfig(ready.config));
       resetPicks(normalizeDraftPicks(ready.picks ?? []));
+      setNotes(ready.notes ?? {});
       setSessionName(null);
       setBootstrapped(true);
     });
   }, [isLoadedMode, navigate, sessionId]);
 
-  // 로드 모드에서만 메모를 서버에서 가져온다. 미저장 모드는 세션 ID가 없어 메모를 못 저장하므로 fetch도 안 함.
+  // 로드 모드 — 서버에서 메모를 가져온다. 미저장 모드는 부트스트랩 effect 가 localStorage 에서 채워주므로 여기선 건드리지 않음.
   useEffect(() => {
-    if (!isLoadedMode || sessionId === null) {
-      queueMicrotask(() => setNotes({}));
-      return;
-    }
+    if (!isLoadedMode || sessionId === null) return;
     const controller = new AbortController();
     apiGetAuth<{ items: PlayerNote[] }>(
       `/api/draft/sessions/${sessionId}/notes`,
@@ -623,18 +636,18 @@ export default function DraftPage() {
     return () => controller.abort();
   }, [isLoadedMode, sessionId]);
 
-  // 미저장 모드에서 picks 가 바뀔 때마다 localStorage 에도 sync — 새로고침 보호.
+  // 미저장 모드에서 picks/notes 가 바뀔 때마다 localStorage 에도 sync — 새로고침 보호.
   useEffect(() => {
     if (isLoadedMode || !bootstrapped || !config || !hasDraftConfig) return;
     try {
       localStorage.setItem(
         UNSAVED_DRAFT_KEY,
-        JSON.stringify({ config, picks } satisfies UnsavedDraft)
+        JSON.stringify({ config, picks, notes } satisfies UnsavedDraft)
       );
     } catch {
       // 쿼터 초과 등은 조용히 무시 — 새로고침 보호 실패해도 화면 동작에는 영향 없음.
     }
-  }, [isLoadedMode, bootstrapped, config, hasDraftConfig, picks]);
+  }, [isLoadedMode, bootstrapped, config, hasDraftConfig, picks, notes]);
 
   // 공개 선수 목록 — leagueType 이 바뀌면 다시 불러온다.
   // AL/NL 은 ?league= 쿼리로 백엔드 필터링, 그 외(custom 등)는 전체.
@@ -919,7 +932,23 @@ export default function DraftPage() {
       "/api/draft/sessions",
       { name, config, picks }
     )
-      .then((data) => {
+      .then(async (data) => {
+        // 미저장 동안 쌓인 로컬 메모를 새 session_id 로 일괄 PUT.
+        // 개별 실패는 무시 — 메모는 부수 데이터이고, 세션 자체는 이미 성공했음.
+        const noteEntries = Object.entries(notes);
+        if (noteEntries.length > 0) {
+          await Promise.all(
+            noteEntries.map(([playerId, note]) =>
+              apiPutAuth<{ status: string }, { note: string }>(
+                `/api/draft/sessions/${data.id}/notes/${encodeURIComponent(playerId)}`,
+                { note }
+              ).catch((err: unknown) => {
+                console.error(`Failed to flush note for ${playerId}:`, err);
+              })
+            )
+          );
+        }
+
         try {
           localStorage.removeItem(UNSAVED_DRAFT_KEY);
         } catch {
@@ -1345,14 +1374,12 @@ export default function DraftPage() {
                       </button>
                       <button
                         type="button"
-                        disabled={!authed || !isLoadedMode}
+                        disabled={!authed}
                         onClick={() => openNoteModal(player)}
                         aria-label={notes[player.id] ? "Edit note" : "Add note"}
                         title={
                           !authed
                             ? "Sign in required"
-                            : !isLoadedMode
-                            ? "Save your draft first to add notes"
                             : notes[player.id]
                             ? "Edit note"
                             : "Add note"
@@ -1362,7 +1389,7 @@ export default function DraftPage() {
                           notes[player.id]
                             ? "border-amber-400/50 bg-amber-500/15 text-amber-300 hover:bg-amber-500/25"
                             : "border-white/10 bg-white/5 text-white/55 hover:bg-white/10 hover:text-white/80",
-                          (!authed || !isLoadedMode) && "cursor-not-allowed opacity-40 hover:bg-white/5",
+                          !authed && "cursor-not-allowed opacity-40 hover:bg-white/5",
                         ]
                           .filter(Boolean)
                           .join(" ")}
