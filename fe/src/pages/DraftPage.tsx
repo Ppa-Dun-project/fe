@@ -61,6 +61,8 @@ import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
 import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
 import PlayerNotePopover from "../features/draft/components/PlayerNotePopover";
+import { useNotificationPolling } from "../hooks/useNotificationPolling";
+import type { NotificationEvent } from "../types/notifications";
 import PlayerInfoModal from "../features/players/components/PlayerInfoModal";
 import Pagination from "../features/players/components/Pagination";
 import Modal from "../components/ui/Modal";
@@ -336,6 +338,19 @@ export default function DraftPage() {
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [noteTarget, setNoteTarget] = useState<DraftPlayer | null>(null);
   const [noteSaving, setNoteSaving] = useState(false);
+
+  // 부상/뎁스 변경 알림 받은 선수 id 집합 — 페이지 떠나기 전까지 row에 빨간 점 표시.
+  const [affectedPlayerIds, setAffectedPlayerIds] = useState<Set<string>>(new Set());
+
+  // 15초마다 백엔드 알림 폴링. 새 이벤트마다 toast + affectedPlayerIds 업데이트.
+  useNotificationPolling((ev: NotificationEvent) => {
+    pushToast(ev.message, "error");
+    setAffectedPlayerIds((prev) => {
+      const next = new Set(prev);
+      next.add(ev.player_id);
+      return next;
+    });
+  }, authed);
 
   // Save / Import 모달
   const [saveModalOpen, setSaveModalOpen] = useState(false);
@@ -1448,6 +1463,13 @@ export default function DraftPage() {
                     <div className="text-center text-white/45">{(page - 1) * PAGE_SIZE + idx + 1}</div>
 
                     <div className="min-w-0 flex items-center gap-1">
+                      {affectedPlayerIds.has(player.id) && (
+                        <span
+                          className="inline-block h-2 w-2 shrink-0 rounded-full bg-rose-500 animate-pulse"
+                          title="Recent update"
+                          aria-label="Recent update"
+                        />
+                      )}
                       <button
                         type="button"
                         onClick={() => openPlayerInfo(player.id, player.playerType)}
