@@ -197,7 +197,7 @@ export function findFirstEmptySlot(occupied: Set<number>, count: number): number
 }
 
 /** Check if player is available, drafted by me, or taken by opponent.
- *  pickKind 를 함께 노출해 호출 측이 (minor)/(taxi) 프리픽스를 붙일 수 있게 한다. */
+ *  pickKind 와 teamId 를 함께 노출해 호출 측이 (minor)/(taxi) 프리픽스와 팀 컬러를 적용할 수 있게 한다. */
 export function getPlayerDraftStatus(playerId: string, picks: DraftPick[], teams: DraftTeam[]) {
   const hit = picks.find((p) => p.playerId === playerId);
   if (!hit) return { kind: "available" as const };
@@ -205,6 +205,7 @@ export function getPlayerDraftStatus(playerId: string, picks: DraftPick[], teams
   const team = teams.find((t) => t.id === hit.draftedByTeamId);
   const teamName = team?.name ?? (hit.type === "mine" ? "My Team" : "Taken");
   const pickKind = hit.kind ?? "main";
+  const teamId = hit.draftedByTeamId;
 
   if (pickKind !== "main") {
     const boardLabel = pickKind === "minor" ? "Minor" : "Taxi";
@@ -213,6 +214,7 @@ export function getPlayerDraftStatus(playerId: string, picks: DraftPick[], teams
       pickKind,
       label: `${boardLabel} - ${teamName}`,
       teamName,
+      teamId,
     } as const;
   }
 
@@ -223,6 +225,7 @@ export function getPlayerDraftStatus(playerId: string, picks: DraftPick[], teams
       pickKind: "main" as const,
       label: `My Pick - $${bidLabel}`,
       teamName,
+      teamId,
     };
   }
 
@@ -231,6 +234,7 @@ export function getPlayerDraftStatus(playerId: string, picks: DraftPick[], teams
     pickKind: "main" as const,
     label: `${teamName} - $${bidLabel}`,
     teamName,
+    teamId,
   };
 }
 
