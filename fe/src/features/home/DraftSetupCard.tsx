@@ -11,7 +11,7 @@ import type { RosterSlotCounts, RosterSlotPosition } from "../../types/draft";
 export type LeagueType = "AL" | "NL" | "custom";
 
 // 모달 안에서 재사용할 때 onSubmit 으로 동작을 override 한다.
-// (생략 시 기본 동작: localStorage 저장 + /draft 로 navigate)
+// (생략 시 기본 동작: sessionStorage 저장 + /draft 로 navigate)
 // embedded=true 면 카드 wrapper(section, border, padding) 없이 폼 내용만 그린다.
 export type DraftSetupConfig = {
   myTeamName: string;
@@ -147,7 +147,7 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
       return;
     }
 
-    localStorage.setItem(
+    sessionStorage.setItem(
       "ppadun_unsaved_draft",
       JSON.stringify({ config, picks: [] })
     );
