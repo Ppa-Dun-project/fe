@@ -57,15 +57,23 @@ export type DraftTeam = {
 export type DraftPickType = "mine" | "taken";
 
 /**
+ * DraftPickKind: 어느 보드에 속한 픽인지 구분
+ * - main: 일반 드래프트 (포지션 슬롯 + bid)
+ * - minor / taxi: 메인 드래프트 전/후로 따로 잡는 무료 픽. 포지션·bid 없음.
+ */
+export type DraftPickKind = "main" | "minor" | "taxi";
+
+/**
  * DraftPick: 개별 드래프트 픽 정보
  */
 export type DraftPick = {
   playerId: string;              // 뽑은 선수 ID
   draftedByTeamId: string;       // 뽑은 팀 ID
   slotIndex: number;             // 로스터 슬롯 번호
-  slotPos: string;               // 슬롯 포지션 (예: "SP", "OF", "BENCH")
-  bid: number | null;            // 낙찰가 ($)
+  slotPos: string | null;        // 슬롯 포지션 — 마이너/택시는 null
+  bid: number | null;            // 낙찰가 ($) — 마이너/택시는 null
   type: DraftPickType;           // "mine" 또는 "taken"
+  kind: DraftPickKind;           // "main" | "minor" | "taxi"
 };
 
 /**

@@ -178,31 +178,59 @@ export function calculateRemainingBudget(budget: number, myTeamId: string, picks
   return Math.max(0, budget - spent);
 }
 
-/** Current draft round (1-based), capped at total rounds. */
+/** Current draft round (1-based), capped at total rounds.
+ *  마이너/택시 픽은 메인 진행도에 영향을 주지 않으므로 카운트에서 제외. */
 export function calculateCurrentRound(teamCount: number, rosterSlots: number, picks: DraftPick[]) {
-  return Math.min(rosterSlots, Math.floor(picks.length / teamCount) + 1);
+  const mainCount = picks.filter((p) => p.kind === "main").length;
+  return Math.min(rosterSlots, Math.floor(mainCount / teamCount) + 1);
 }
 
-/** Check if player is available, drafted by me, or taken by opponent. */
+/** 마이너/택시 보드의 슬롯 개수. 메인과 달리 포지션 라벨 없는 평면 슬롯. */
+export const MINOR_TAXI_SLOT_COUNT = 8;
+
+/** 마이너/택시처럼 자격 검사가 없는 보드에서 occupied 가 아닌 첫 빈 슬롯을 반환. 없으면 -1. */
+export function findFirstEmptySlot(occupied: Set<number>, count: number): number {
+  for (let i = 0; i < count; i += 1) {
+    if (!occupied.has(i)) return i;
+  }
+  return -1;
+}
+
+/** Check if player is available, drafted by me, or taken by opponent.
+ *  pickKind 를 함께 노출해 호출 측이 (minor)/(taxi) 프리픽스를 붙일 수 있게 한다. */
 export function getPlayerDraftStatus(playerId: string, picks: DraftPick[], teams: DraftTeam[]) {
   const hit = picks.find((p) => p.playerId === playerId);
   if (!hit) return { kind: "available" as const };
 
   const team = teams.find((t) => t.id === hit.draftedByTeamId);
-  const bidLabel = hit.bid ?? "?";
+  const teamName = team?.name ?? (hit.type === "mine" ? "My Team" : "Taken");
+  const pickKind = hit.kind ?? "main";
 
+  if (pickKind !== "main") {
+    const boardLabel = pickKind === "minor" ? "Minor" : "Taxi";
+    return {
+      kind: hit.type, // "mine" | "taken" — 기존 분기 그대로
+      pickKind,
+      label: `${boardLabel} - ${teamName}`,
+      teamName,
+    } as const;
+  }
+
+  const bidLabel = hit.bid ?? "?";
   if (hit.type === "mine") {
     return {
       kind: "mine" as const,
+      pickKind: "main" as const,
       label: `My Pick - $${bidLabel}`,
-      teamName: team?.name ?? "My Team",
+      teamName,
     };
   }
 
   return {
     kind: "taken" as const,
-    label: `${team?.name ?? "Taken"} - $${bidLabel}`,
-    teamName: team?.name ?? "Taken",
+    pickKind: "main" as const,
+    label: `${teamName} - $${bidLabel}`,
+    teamName,
   };
 }
 

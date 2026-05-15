@@ -1,13 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { DraftPlayer, DraftTeam } from "../../../types/draft";
+import type { DraftPickKind, DraftPlayer, DraftTeam } from "../../../types/draft";
 
 type Props = {
   open: boolean;
   player: DraftPlayer | null;
   teams: DraftTeam[];
   remainingBudgetByTeam: Record<string, number>;
+  // 마이너/택시 보드는 bid 가 없음 — 입력 필드/검증 건너뛰고 bid=null 로 confirm.
+  kind?: DraftPickKind;
   onClose: () => void;
-  onConfirm: (draftedByTeamId: string, bid: number) => void;
+  onConfirm: (draftedByTeamId: string, bid: number | null) => void;
 };
 
 export default function TakenBidModal({
@@ -15,9 +17,11 @@ export default function TakenBidModal({
   player,
   teams,
   remainingBudgetByTeam,
+  kind = "main",
   onClose,
   onConfirm,
 }: Props) {
+  const isMainKind = kind === "main";
   const otherTeams = useMemo(() => teams.filter((t) => !t.isMine), [teams]);
 
   const initialTeamId = useMemo(() => otherTeams[0]?.id ?? "", [otherTeams]);
@@ -75,6 +79,11 @@ export default function TakenBidModal({
 
   const handleConfirm = () => {
     if (!validTeam) return;
+    // 마이너/택시는 bid 가 없으니 그대로 confirm.
+    if (!isMainKind) {
+      onConfirm(draftedByTeamId, null);
+      return;
+    }
     if (!Number.isFinite(parsedBid) || parsedBid < 1) {
       openMinBidError();
       return;
@@ -92,7 +101,11 @@ export default function TakenBidModal({
 
       <div className="relative mx-auto mt-24 w-[92%] max-w-md overflow-visible rounded-3xl border border-rose-400/25 bg-[#1b1112] shadow-2xl">
         <div className="rounded-t-3xl bg-rose-600 px-6 py-3 text-center text-sm font-black text-white">
-          Opponent Draft Bid
+          {isMainKind
+            ? "Opponent Draft Bid"
+            : kind === "minor"
+            ? "Opponent Minor Pick"
+            : "Opponent Taxi Pick"}
         </div>
 
         <div className="p-6">
@@ -126,44 +139,46 @@ export default function TakenBidModal({
               </select>
             </div>
 
-            <div className="border-t border-white/10 pt-4">
-              <div className="text-xs font-extrabold text-white/70">Winning Bid</div>
-              <div className="mt-2 flex items-center gap-2">
-                <input
-                  value={bid}
-                  onChange={(e) => setBid(e.target.value)}
-                  inputMode="numeric"
-                  placeholder="Enter winning bid"
-                  className={[
-                    "w-full rounded-2xl bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35",
-                    bidInputErrorOpen
-                      ? "border border-rose-500 ring-1 ring-rose-400/80"
-                      : "border border-white/10 focus:border-rose-400/35",
-                  ].join(" ")}
-                />
-                <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 text-sm font-black text-white/60">
-                  $
+            {isMainKind && (
+              <div className="border-t border-white/10 pt-4">
+                <div className="text-xs font-extrabold text-white/70">Winning Bid</div>
+                <div className="mt-2 flex items-center gap-2">
+                  <input
+                    value={bid}
+                    onChange={(e) => setBid(e.target.value)}
+                    inputMode="numeric"
+                    placeholder="Enter winning bid"
+                    className={[
+                      "w-full rounded-2xl bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35",
+                      bidInputErrorOpen
+                        ? "border border-rose-500 ring-1 ring-rose-400/80"
+                        : "border border-white/10 focus:border-rose-400/35",
+                    ].join(" ")}
+                  />
+                  <div className="grid h-12 w-12 place-items-center rounded-2xl bg-white/10 text-sm font-black text-white/60">
+                    $
+                  </div>
+                </div>
+
+                {minBidErrorOpen && (
+                  <div className="relative mt-2 inline-block rounded-xl bg-rose-500 px-3 py-2 text-xs font-bold text-white shadow-lg">
+                    <span className="absolute -top-1 left-4 h-2 w-2 rotate-45 bg-rose-500" />
+                    Winning bid must be at least $1.
+                  </div>
+                )}
+
+                {budgetErrorOpen && (
+                  <div className="relative mt-2 inline-block rounded-xl bg-rose-500 px-3 py-2 text-xs font-bold text-white shadow-lg">
+                    <span className="absolute -top-1 left-4 h-2 w-2 rotate-45 bg-rose-500" />
+                    Winning bid cannot exceed this team's remaining budget (${selectedTeamBudget}).
+                  </div>
+                )}
+
+                <div className="mt-2 text-xs text-white/35">
+                  Record the actual winning amount to track opponent budgets.
                 </div>
               </div>
-
-              {minBidErrorOpen && (
-                <div className="relative mt-2 inline-block rounded-xl bg-rose-500 px-3 py-2 text-xs font-bold text-white shadow-lg">
-                  <span className="absolute -top-1 left-4 h-2 w-2 rotate-45 bg-rose-500" />
-                  Winning bid must be at least $1.
-                </div>
-              )}
-
-              {budgetErrorOpen && (
-                <div className="relative mt-2 inline-block rounded-xl bg-rose-500 px-3 py-2 text-xs font-bold text-white shadow-lg">
-                  <span className="absolute -top-1 left-4 h-2 w-2 rotate-45 bg-rose-500" />
-                  Winning bid cannot exceed this team's remaining budget (${selectedTeamBudget}).
-                </div>
-              )}
-
-              <div className="mt-2 text-xs text-white/35">
-                Record the actual winning amount to track opponent budgets.
-              </div>
-            </div>
+            )}
           </div>
 
           <div className="mt-8 flex gap-3">
