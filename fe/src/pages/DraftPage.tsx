@@ -268,10 +268,14 @@ export default function DraftPage() {
   // Toast queue. id 는 monotonic counter 로 부여한다.
   const toastIdRef = useRef(0);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
-  const pushToast = (text: string, variant: ToastVariant = "info") => {
+  const pushToast = (
+    text: string,
+    variant: ToastVariant = "info",
+    durationMs?: number,
+  ) => {
     toastIdRef.current += 1;
     const id = toastIdRef.current;
-    setToasts((prev) => [...prev, { id, text, variant }]);
+    setToasts((prev) => [...prev, { id, text, variant, durationMs }]);
   };
   const dismissToast = (id: number) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
@@ -340,8 +344,24 @@ export default function DraftPage() {
   const [affectedPlayerIds, setAffectedPlayerIds] = useState<Set<string>>(new Set());
 
   // 15초마다 백엔드 알림 폴링. 새 이벤트마다 toast + affectedPlayerIds 업데이트.
+  // event_type 별로 prefix와 색을 다르게 → 사용자가 한눈에 종류 파악 가능.
+  // 토스트는 8초간 유지 (기본 3.5초보다 길게) 해서 메시지 읽을 시간 확보.
   useNotificationPolling((ev: NotificationEvent) => {
-    pushToast(ev.message, "error");
+    const isInjury = ev.event_type === "INJURY";
+    const isDepth = ev.event_type === "DEPTH";
+    const prefix = isInjury
+      ? "🏥 INJURY UPDATE"
+      : isDepth
+        ? "📊 DEPTH CHART UPDATE"
+        : "🔔 NOTIFICATION";
+    const variant: ToastVariant = isInjury
+      ? "injury"
+      : isDepth
+        ? "depth"
+        : "info";
+
+    pushToast(`${prefix} — ${ev.message}`, variant, 8000);
+
     setAffectedPlayerIds((prev) => {
       const next = new Set(prev);
       next.add(ev.player_id);
