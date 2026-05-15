@@ -172,6 +172,7 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
             value={myTeam}
             onChange={(e) => setMyTeam(e.target.value)}
             placeholder="e.g., Black Sluggers"
+            maxLength={20}
             className={INPUT_CLASS}
           />
         </div>
@@ -254,6 +255,7 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
                     value={name}
                     onChange={(e) => updateOppTeamName(i, e.target.value)}
                     placeholder={`Opponent ${i + 1}`}
+                    maxLength={20}
                     className={INPUT_CLASS_COMPACT}
                   />
                 ))}

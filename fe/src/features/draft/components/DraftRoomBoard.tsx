@@ -274,10 +274,9 @@ export default function DraftRoomBoard({
                             }
                             {...dndProps}
                             className={[
+                              // 픽 카드 색은 픽을 가진 팀의 accent 로 통일 — 내 팀(sky) / 각 opponent 의 고유 색.
                               "relative rounded-xl border px-3 py-2 text-left transition",
-                              pick.type === "mine"
-                                ? "border-sky-400/30 bg-sky-500/10"
-                                : "border-rose-400/25 bg-rose-500/8",
+                              accent.slot,
                               isMyTeam ? "cursor-grab active:cursor-grabbing" : "",
                               hoverRingClass,
                             ].join(" ")}
@@ -302,7 +301,7 @@ export default function DraftRoomBoard({
                               </div>
                             )}
                             <div className="pr-5 text-[11px] font-black text-white">
-                              {slotIndex + 1}. {player.name}
+                              {player.name}
                             </div>
                             <div className="mt-1 flex items-center gap-2 text-[10px] text-white/55">
                               <span>{player.team}</span>

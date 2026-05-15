@@ -51,6 +51,7 @@ import {
   isEligibleForSlot,
   mlbTeamBadgeClass,
   sumRosterSlots,
+  teamAccentClass,
 } from "../features/draft/utils";
 import { formatPpa, ppaValueClass } from "../utils/playerValue";
 
@@ -1323,6 +1324,15 @@ export default function DraftPage() {
               !error &&
               players.map((player, idx) => {
                 const status = getPlayerDraftStatus(player.id, picks, teams);
+                // 픽이 있다면 그 팀의 accent 컬러를 가져온다 — 뱃지를 팀별 색으로 통일하기 위함.
+                const pickedByTeamIdx =
+                  status.kind !== "available"
+                    ? teams.findIndex((t) => t.id === status.teamId)
+                    : -1;
+                const pickedAccent =
+                  pickedByTeamIdx >= 0
+                    ? teamAccentClass(teams[pickedByTeamIdx], pickedByTeamIdx)
+                    : null;
                 const compareAActive = compareAId === player.id;
                 const compareBActive = compareBId === player.id;
                 const compareRole = compareAActive ? "A" : compareBActive ? "B" : null;
@@ -1391,17 +1401,9 @@ export default function DraftPage() {
                     </div>
 
                     <div className="flex items-center justify-center gap-2">
-                      {status.kind !== "available" && status.pickKind !== "main" ? (
-                        // 마이너/택시 픽은 메인의 mine/taken 색감과 구분하기 위해 amber 톤.
-                        <div className="rounded-xl bg-amber-500/15 px-3 py-2 text-xs font-black text-amber-200 ring-1 ring-amber-400/20">
-                          {status.label}
-                        </div>
-                      ) : status.kind === "mine" ? (
-                        <div className="rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-black text-sky-200 ring-1 ring-sky-400/20">
-                          {status.label}
-                        </div>
-                      ) : status.kind === "taken" ? (
-                        <div className="rounded-xl bg-rose-500/15 px-3 py-2 text-xs font-black text-rose-200 ring-1 ring-rose-400/20">
+                      {status.kind !== "available" ? (
+                        // 픽된 선수의 뱃지는 픽한 팀의 accent 컬러로 통일. label 안에 Minor/Taxi 구분이 들어있음.
+                        <div className={`rounded-xl border px-3 py-2 text-xs font-black ${pickedAccent?.header ?? ""}`}>
                           {status.label}
                         </div>
                       ) : authed ? (
