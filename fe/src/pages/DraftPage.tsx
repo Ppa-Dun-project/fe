@@ -24,6 +24,7 @@ import { apiGet, apiGetAuth, apiPostAuth, apiPutAuth, apiDeleteAuth } from "../l
 import type {
   DraftConfigServer,
   DraftPick,
+  DraftPickKind,
   DraftPlayer,
   DraftPlayerPublic,
   DraftPlayerValue,
@@ -38,12 +39,14 @@ type DraftPosition = DraftPlayer["positions"][number];
 
 import {
   DEFAULT_ROSTER_SLOTS,
+  MINOR_TAXI_SLOT_COUNT,
   buildSlotTemplateFromCounts,
   calculateCurrentRound,
   calculateRemainingBudget,
   clampRosterSize,
   draftCostClass,
   findEligibleSlotIndex,
+  findFirstEmptySlot,
   formatAvg,
   getPlayerDraftStatus,
   isEligibleForSlot,
@@ -216,10 +219,12 @@ function normalizeDraftTeamId(teamId: string) {
   return teamId;
 }
 
-function normalizeDraftPicks(picks: DraftPick[]) {
+function normalizeDraftPicks(picks: DraftPick[]): DraftPick[] {
   return picks.map((pick) => ({
     ...pick,
     draftedByTeamId: normalizeDraftTeamId(pick.draftedByTeamId),
+    // 옛 localStorage / 세션엔 kind 가 없을 수 있어 main 폴백.
+    kind: pick.kind ?? "main",
   }));
 }
 
@@ -318,6 +323,10 @@ export default function DraftPage() {
   const [comparisonOpen, setComparisonOpen] = useState(false);
   const [profilePlayerId, setProfilePlayerId] = useState<number | null>(null);
   const [profilePlayerType, setProfilePlayerType] = useState<"batter" | "pitcher">("batter");
+
+  // 현재 보고 있는 보드 — 메인/마이너/택시. DraftRoomBoard 의 포스트잇 탭으로 전환.
+  // Add/Taken 액션은 이 view 의 kind 로 픽을 생성한다.
+  const [boardView, setBoardView] = useState<DraftPickKind>("main");
 
   const [addTarget, setAddTarget] = useState<DraftPlayer | null>(null);
   const [takenTarget, setTakenTarget] = useState<DraftPlayer | null>(null);
@@ -781,21 +790,38 @@ export default function DraftPage() {
   };
 
   // 내 팀 보드 안에서 드래그로 슬롯을 옮길 때:
-  //   - 대상이 비어 있으면 자격(isEligibleForSlot) 만 만족하면 이동
-  //   - 대상이 차 있으면 양방향 자격(둘 다 상대 슬롯에 들어갈 수 있음)일 때만 swap
-  //   - 그 외에는 toast 로 사유 설명
-  const handleSlotReassign = (fromIndex: number, toIndex: number) => {
+  //   - 메인: 자격(isEligibleForSlot) 검사 후 이동/스왑.
+  //   - 마이너/택시: 포지션 자격이 없으니 순수 재정렬(스왑/빈자리 이동).
+  // kind 는 어느 보드의 슬롯을 만지는지 — 같은 kind 내에서만 인덱스 충돌이 발생.
+  const handleSlotReassign = (fromIndex: number, toIndex: number, kind: DraftPickKind) => {
     if (fromIndex === toIndex) return;
     const myTeamId = myTeam?.id;
     if (!myTeamId) return;
+
+    const myPicks = picks.filter(
+      (p) => p.draftedByTeamId === myTeamId && p.kind === kind
+    );
+    const fromPick = myPicks.find((p) => p.slotIndex === fromIndex);
+    if (!fromPick) return;
+    const toPick = myPicks.find((p) => p.slotIndex === toIndex);
+
+    // 마이너/택시: 자격 검사 없이 그냥 스왑/이동.
+    if (kind !== "main") {
+      commitPicks((prev) =>
+        prev.map((p) => {
+          if (p.kind !== kind) return p;
+          if (p.playerId === fromPick.playerId) return { ...p, slotIndex: toIndex };
+          if (toPick && p.playerId === toPick.playerId) return { ...p, slotIndex: fromIndex };
+          return p;
+        })
+      );
+      return;
+    }
 
     const fromSlotPos = slotTemplate[fromIndex];
     const toSlotPos = slotTemplate[toIndex];
     if (!fromSlotPos || !toSlotPos) return;
 
-    const myPicks = picks.filter((p) => p.draftedByTeamId === myTeamId);
-    const fromPick = myPicks.find((p) => p.slotIndex === fromIndex);
-    if (!fromPick) return;
     const fromPlayer = playersById[fromPick.playerId];
     if (!fromPlayer) return;
 
@@ -803,8 +829,6 @@ export default function DraftPage() {
       pushToast(`${fromPlayer.name} is not eligible for ${toSlotPos}.`, "error");
       return;
     }
-
-    const toPick = myPicks.find((p) => p.slotIndex === toIndex);
 
     // Empty target → simple move.
     if (!toPick) {
@@ -841,20 +865,47 @@ export default function DraftPage() {
     );
   };
 
-  // 옵션 A: 픽 추가 시 클라이언트가 즉시 slotIndex 결정.
-  // 같은 playerId 의 기존 픽은 제외 → 같은 팀 occupied 슬롯 집합 → findAvailableSlotIndex.
+  // 픽 추가 시 클라이언트가 즉시 slotIndex 결정.
+  // 같은 playerId 의 기존 픽은 제외 → 같은 팀+kind occupied 슬롯 집합 → 빈 슬롯 찾기.
+  // 메인은 포지션 자격 매칭, 마이너/택시는 그냥 첫 빈 자리.
   // -1 이면 자리 없음 알림 후 종료.
   const addPickToState = (
     playerId: string,
     draftedByTeamId: string,
-    bid: number,
-    type: DraftPick["type"]
+    bid: number | null,
+    type: DraftPick["type"],
+    kind: DraftPickKind
   ) => {
     const filtered = picks.filter((p) => p.playerId !== playerId);
     const occupied = new Set(
-      filtered.filter((p) => p.draftedByTeamId === draftedByTeamId).map((p) => p.slotIndex)
+      filtered
+        .filter((p) => p.draftedByTeamId === draftedByTeamId && p.kind === kind)
+        .map((p) => p.slotIndex)
     );
     const player = playersById[playerId];
+
+    if (kind !== "main") {
+      const slotIndex = findFirstEmptySlot(occupied, MINOR_TAXI_SLOT_COUNT);
+      if (slotIndex === -1) {
+        pushToast(
+          `No empty ${kind} slot for ${player?.name ?? "this player"}.`,
+          "error"
+        );
+        return false;
+      }
+      const next: DraftPick = {
+        playerId,
+        draftedByTeamId,
+        slotIndex,
+        slotPos: null,
+        bid: null,
+        type,
+        kind,
+      };
+      commitPicks([...filtered, next]);
+      return true;
+    }
+
     const slotIndex = findEligibleSlotIndex(
       player?.positions,
       slotTemplate,
@@ -869,21 +920,41 @@ export default function DraftPage() {
     }
 
     const slotPos = (slotTemplate[slotIndex] ?? "BENCH") as DraftPosition;
-    const next: DraftPick = { playerId, draftedByTeamId, slotIndex, slotPos, bid, type };
+    const next: DraftPick = {
+      playerId,
+      draftedByTeamId,
+      slotIndex,
+      slotPos,
+      bid,
+      type,
+      kind: "main",
+    };
     commitPicks([...filtered, next]);
     return true;
   };
 
+  // Add 버튼 클릭 — 메인이면 bid 모달, 마이너/택시는 바로 추가.
+  const handleAddClick = (player: DraftPlayer) => {
+    if (boardView !== "main") {
+      if (!myTeam) return;
+      if (addPickToState(player.id, myTeam.id, null, "mine", boardView)) {
+        draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+    openAddModal(player);
+  };
+
   const handleAddFinish = (bid: number) => {
     if (!addTarget || !myTeam) return;
-    if (!addPickToState(addTarget.id, myTeam.id, bid, "mine")) return;
+    if (!addPickToState(addTarget.id, myTeam.id, bid, "mine", "main")) return;
     closeAddModal();
     draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const handleTakenFinish = (draftedByTeamId: string, bid: number) => {
+  const handleTakenFinish = (draftedByTeamId: string, bid: number | null) => {
     if (!takenTarget) return;
-    if (!addPickToState(takenTarget.id, draftedByTeamId, bid, "taken")) return;
+    if (!addPickToState(takenTarget.id, draftedByTeamId, bid, "taken", boardView)) return;
     closeTakenModal();
     draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -1130,6 +1201,8 @@ export default function DraftPage() {
               totalRounds={rosterSize}
               authed={authed}
               myTeamId={myTeam?.id ?? null}
+              view={boardView}
+              onViewChange={setBoardView}
               onRemovePick={handleRemovePick}
               onSlotReassign={handleSlotReassign}
             />
@@ -1315,19 +1388,19 @@ export default function DraftPage() {
       <FadeIn delayMs={140}>
         <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5">
           <div className="grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] bg-black/40 px-4 py-3 text-xs font-extrabold text-white/60">
-            <div>#</div>
+            <div className="text-center">#</div>
             <div>Player</div>
-            <div>Pos</div>
-            <div>Draft Cost</div>
-            <div>Team</div>
-            <div>{statColumnLabels[0]}</div>
-            <div>{statColumnLabels[1]}</div>
-            <div>{statColumnLabels[2]}</div>
-            <div>{statColumnLabels[3]}</div>
-            <div>{statColumnLabels[4]}</div>
-            <div>PPA-DUN Value</div>
-            <div>Action</div>
-            <div>Compare</div>
+            <div className="text-center">Pos</div>
+            <div className="text-center">Cost</div>
+            <div className="text-center">Team</div>
+            <div className="text-center">{statColumnLabels[0]}</div>
+            <div className="text-center">{statColumnLabels[1]}</div>
+            <div className="text-center">{statColumnLabels[2]}</div>
+            <div className="text-center">{statColumnLabels[3]}</div>
+            <div className="text-center">{statColumnLabels[4]}</div>
+            <div className="text-center">PPA-Value</div>
+            <div className="text-center">Action</div>
+            <div className="text-center">Compare</div>
           </div>
 
           <div className="bg-black/20">
@@ -1356,19 +1429,20 @@ export default function DraftPage() {
                   <div
                     key={player.id}
                     className={[
-                      "grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] items-center px-4 py-3 text-sm text-white/85 transition",
+                      "grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] items-center px-4 py-3 text-sm text-white/85 transition tabular-nums",
                       compareActive
                         ? "relative z-[1] my-1 rounded-xl border border-emerald-400/75 bg-emerald-500/10 shadow-[0_0_18px_rgba(16,185,129,0.35)]"
                         : "hover:bg-white/5",
                     ].join(" ")}
                   >
-                    <div className="text-white/45">{(page - 1) * PAGE_SIZE + idx + 1}</div>
+                    <div className="text-center text-white/45">{(page - 1) * PAGE_SIZE + idx + 1}</div>
 
-                    <div className="flex items-center gap-1">
+                    <div className="min-w-0 flex items-center gap-1">
                       <button
                         type="button"
                         onClick={() => openPlayerInfo(player.id, player.playerType)}
-                        className="rounded-md border border-transparent px-2 py-1 -mx-2 -my-1 font-semibold text-white transition hover:border-white/35 hover:bg-white/5 hover:text-amber-200 focus-visible:border-white/45 focus-visible:bg-white/10 focus-visible:outline-none"
+                        className="block w-full truncate rounded-md border border-transparent px-2 py-1 -mx-2 -my-1 text-left font-semibold text-white transition hover:border-white/35 hover:bg-white/5 hover:text-amber-200 focus-visible:border-white/45 focus-visible:bg-white/10 focus-visible:outline-none"
+                        title={player.name}
                       >
                         {player.name}
                       </button>
@@ -1404,15 +1478,15 @@ export default function DraftPage() {
                       </button>
                     </div>
 
-                    <div>
-                      <span className="rounded-lg bg-white/10 px-2 py-1 text-[11px] font-extrabold text-white/80">
+                    <div className="text-center">
+                      <span className="inline-block rounded-lg bg-white/10 px-2 py-1 text-[11px] font-extrabold text-white/80">
                         {player.positions[0]}
                       </span>
                     </div>
 
-                    <div className={draftCostClass(authed)}>${player.recommendedBid ?? "—"}</div>
+                    <div className={`text-center ${draftCostClass(authed)}`}>${player.recommendedBid ?? "—"}</div>
 
-                    <div>
+                    <div className="text-center">
                       <span
                         className={[
                           "inline-flex items-center rounded-lg border px-2 py-1 text-[11px] font-extrabold",
@@ -1423,28 +1497,33 @@ export default function DraftPage() {
                       </span>
                     </div>
 
-                    <div className="text-white/70">
+                    <div className="text-center text-white/70">
                       {isPitcherOnly(player) ? formatNumber(player.era, 2) : formatAvg(player.avg)}
                     </div>
-                    <div className="font-semibold text-amber-300">
+                    <div className="text-center font-semibold text-amber-300">
                       {isPitcherOnly(player) ? player.so ?? "-" : player.hr ?? "-"}
                     </div>
-                    <div className="text-white/70">
+                    <div className="text-center text-white/70">
                       {isPitcherOnly(player) ? player.w ?? "-" : player.rbi ?? "-"}
                     </div>
-                    <div className="font-semibold text-amber-300">
+                    <div className="text-center font-semibold text-amber-300">
                       {isPitcherOnly(player) ? player.sv ?? "-" : player.sb ?? "-"}
                     </div>
-                    <div className="text-white/70">
+                    <div className="text-center text-white/70">
                       {isPitcherOnly(player) ? formatNumber(player.ip, 1) : player.ab ?? "-"}
                     </div>
 
-                    <div className={`font-black ${ppaValueClass(player.ppaValue, { authed })}`}>
+                    <div className={`text-center font-black ${ppaValueClass(player.ppaValue, { authed })}`}>
                       {formatPpa(player.ppaValue)}
                     </div>
 
-                    <div className="flex items-center gap-2">
-                      {status.kind === "mine" ? (
+                    <div className="flex items-center justify-center gap-2">
+                      {status.kind !== "available" && status.pickKind !== "main" ? (
+                        // 마이너/택시 픽은 메인의 mine/taken 색감과 구분하기 위해 amber 톤.
+                        <div className="rounded-xl bg-amber-500/15 px-3 py-2 text-xs font-black text-amber-200 ring-1 ring-amber-400/20">
+                          {status.label}
+                        </div>
+                      ) : status.kind === "mine" ? (
                         <div className="rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-black text-sky-200 ring-1 ring-sky-400/20">
                           {status.label}
                         </div>
@@ -1455,7 +1534,7 @@ export default function DraftPage() {
                       ) : authed ? (
                         <>
                           <button
-                            onClick={() => openAddModal(player)}
+                            onClick={() => handleAddClick(player)}
                             className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-200 ring-1 ring-emerald-400/20 transition hover:bg-emerald-500/25"
                           >
                             Add
@@ -1474,7 +1553,7 @@ export default function DraftPage() {
                       )}
                     </div>
 
-                    <div className="flex items-center justify-end">
+                    <div className="flex items-center justify-center">
                       <button
                         type="button"
                         disabled={!authed}
@@ -1527,15 +1606,16 @@ export default function DraftPage() {
 
       {takenTarget && (
         <TakenBidModal
-          key={`taken-${takenTarget.id}`}
+          key={`taken-${takenTarget.id}-${boardView}`}
           open={true}
-      player={takenTarget}
-      teams={teams}
-      remainingBudgetByTeam={remainingBudgetByTeam}
-      onClose={closeTakenModal}
-      onConfirm={handleTakenFinish}
-    />
-  )}
+          player={takenTarget}
+          teams={teams}
+          remainingBudgetByTeam={remainingBudgetByTeam}
+          kind={boardView}
+          onClose={closeTakenModal}
+          onConfirm={handleTakenFinish}
+        />
+      )}
 
       <PlayerComparisonModal
         open={comparisonOpen && Boolean(selectedA) && Boolean(selectedB)}

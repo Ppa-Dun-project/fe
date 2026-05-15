@@ -1,23 +1,40 @@
 import { useMemo, useRef, useState } from "react";
-import type { DraftPick, DraftPlayer, DraftTeam } from "../../../types/draft";
-import { isEligibleForSlot, teamAccentClass } from "../utils";
+import type { DraftPick, DraftPickKind, DraftPlayer, DraftTeam } from "../../../types/draft";
+import { MINOR_TAXI_SLOT_COUNT, isEligibleForSlot, teamAccentClass } from "../utils";
 
 type Props = {
   teams: DraftTeam[];
-  slotTemplate: string[];
-  picks: DraftPick[];
+  slotTemplate: string[];                 // 메인 보드 슬롯 (마이너/택시는 컴포넌트가 자체 생성)
+  picks: DraftPick[];                     // 모든 kind 통합 — 컴포넌트가 view 로 필터
   playersById: Record<string, DraftPlayer>;
   currentRound: number;
   totalRounds: number;
   authed: boolean;
   myTeamId: string | null;
+  view: DraftPickKind;                    // 현재 보고 있는 보드
+  onViewChange: (next: DraftPickKind) => void;
   onRemovePick: (pick: DraftPick) => void;
   // 내 팀 안에서 드래그-드롭으로 슬롯 인덱스를 바꿀 때 호출.
-  onSlotReassign?: (fromIndex: number, toIndex: number) => void;
+  // 마이너/택시는 자격 검사 없이 순수 재정렬.
+  onSlotReassign?: (fromIndex: number, toIndex: number, kind: DraftPickKind) => void;
 };
 
 // Drag payload: 자기 팀의 어떤 슬롯에서 출발했는지.
 const DRAG_MIME = "application/x-ppadun-slot";
+
+// 보드 탭. 항상 3개 모두 노출하고 현재 view 만 강조.
+const ALL_TABS: { key: DraftPickKind; label: string }[] = [
+  { key: "minor", label: "Minor" },
+  { key: "main", label: "Main" },
+  { key: "taxi", label: "Taxi" },
+];
+
+// 보드별 헤더 텍스트.
+const BOARD_HEADER: Record<DraftPickKind, { title: string; subtitle: string }> = {
+  main: { title: "Draft Room", subtitle: "Live draft status by team" },
+  minor: { title: "Minor Draft", subtitle: "Free picks before main draft" },
+  taxi: { title: "Taxi Draft", subtitle: "Free taxi-squad picks" },
+};
 
 export default function DraftRoomBoard({
   teams,
@@ -28,6 +45,8 @@ export default function DraftRoomBoard({
   totalRounds,
   authed,
   myTeamId,
+  view,
+  onViewChange,
   onRemovePick,
   onSlotReassign,
 }: Props) {
@@ -38,10 +57,12 @@ export default function DraftRoomBoard({
   // 드래그가 hover 중인 슬롯 — 자격 여부에 따라 테두리 색을 다르게 칠한다.
   const [hoverTarget, setHoverTarget] = useState<{ index: number; ok: boolean } | null>(null);
 
+  // 현재 보드에 해당하는 픽만 추려서 팀별로 정렬.
   const picksByTeam = useMemo(() => {
     const map = new Map<string, DraftPick[]>();
     for (const team of teams) map.set(team.id, []);
     for (const pick of picks) {
+      if (pick.kind !== view) continue;
       const arr = map.get(pick.draftedByTeamId);
       if (arr) arr.push(pick);
     }
@@ -49,7 +70,16 @@ export default function DraftRoomBoard({
       arr.sort((a, b) => a.slotIndex - b.slotIndex);
     }
     return map;
-  }, [teams, picks]);
+  }, [teams, picks, view]);
+
+  // view 에 따라 슬롯 템플릿 선택. 마이너/택시는 8개 평면 슬롯 (라벨 없음).
+  const effectiveSlotTemplate = useMemo(
+    () =>
+      view === "main"
+        ? slotTemplate
+        : Array(MINOR_TAXI_SLOT_COUNT).fill("") as string[],
+    [view, slotTemplate]
+  );
 
   const canScroll = teams.length > 7;
 
@@ -64,34 +94,69 @@ export default function DraftRoomBoard({
 
   if (!authed) return null;
 
-  // 출발 슬롯의 player 가 target 슬롯에 자격이 있는지 확인 (드래그 hover 시각화 용).
+  // 출발 슬롯의 player 가 target 슬롯에 자격이 있는지 확인 (메인만 의미 있음).
+  // 마이너/택시는 슬롯 자격 자체가 없으니 항상 OK.
   const isHoverEligible = (toIndex: number): boolean => {
     if (draggingFrom === null || !myTeamId) return false;
     if (draggingFrom === toIndex) return true;
+    if (view !== "main") return true;
+
     const fromPick = (picksByTeam.get(myTeamId) ?? []).find(
       (p) => p.slotIndex === draggingFrom
     );
     if (!fromPick) return false;
     const player = playersById[fromPick.playerId];
     if (!player) return false;
-    const toSlotPos = slotTemplate[toIndex];
+    const toSlotPos = effectiveSlotTemplate[toIndex];
     if (!toSlotPos) return false;
     return isEligibleForSlot(player.positions, toSlotPos);
   };
 
+  const header = BOARD_HEADER[view];
+  const isMainView = view === "main";
+
   return (
-    <section className="rounded-3xl border border-white/10 bg-white/5 p-4">
+    <section className="relative mt-10 rounded-3xl border border-white/10 bg-white/5 p-4">
+      {/* 상단 중앙에 붙은 탭 — 항상 3개 노출, 활성 탭은 박스와 한 면처럼 이어진다 */}
+      <div className="absolute left-1/2 top-0 z-10 flex -translate-x-1/2 -translate-y-full">
+        {ALL_TABS.map((tab) => {
+          const isActive = tab.key === view;
+          return (
+            <button
+              key={tab.key}
+              type="button"
+              onClick={() => onViewChange(tab.key)}
+              className={[
+                "rounded-t-xl border border-white/10 px-5 py-1.5 text-xs font-black uppercase tracking-wider transition",
+                isActive
+                  ? // 활성: 박스 내부와 동일한 불투명 색(#000 위 white/5 합성값)으로 보더를 완전 가림. 안쪽 위 하이라이트로 살짝 입체.
+                    "relative z-10 translate-y-px border-b-0 bg-[#0d0d0d] text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12)]"
+                  : "border-b-0 bg-white/[0.02] text-white/45 hover:bg-white/[0.05] hover:text-white/75",
+              ].join(" ")}
+              title={`Switch to ${tab.label} draft`}
+            >
+              {tab.label}
+            </button>
+          );
+        })}
+      </div>
+
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <div className="text-sm font-black text-white">Draft Room</div>
+          <div className="text-sm font-black text-white">{header.title}</div>
           <div className="mt-1 text-xs text-white/55">
-            Live draft status by team | {totalRounds} roster slots each
+            {header.subtitle}
+            {isMainView
+              ? ` | ${totalRounds} roster slots each`
+              : ` | ${MINOR_TAXI_SLOT_COUNT} slots each`}
           </div>
         </div>
 
-        <div className="text-sm font-black text-emerald-400">
-          Round {currentRound} / {totalRounds}
-        </div>
+        {isMainView && (
+          <div className="text-sm font-black text-emerald-400">
+            Round {currentRound} / {totalRounds}
+          </div>
+        )}
       </div>
 
       <div className="relative">
@@ -141,7 +206,7 @@ export default function DraftRoomBoard({
                   </div>
 
                   <div className="space-y-2">
-                    {slotTemplate.map((slotPos, slotIndex) => {
+                    {effectiveSlotTemplate.map((slotPos, slotIndex) => {
                       const pick = teamPicks.find((p) => p.slotIndex === slotIndex);
                       const player = pick ? playersById[pick.playerId] : null;
 
@@ -179,7 +244,7 @@ export default function DraftRoomBoard({
                               if (!raw) return;
                               const fromIndex = Number(raw);
                               if (Number.isFinite(fromIndex)) {
-                                onSlotReassign?.(fromIndex, slotIndex);
+                                onSlotReassign?.(fromIndex, slotIndex, view);
                               }
                             },
                           }
@@ -226,16 +291,27 @@ export default function DraftRoomBoard({
                               x
                             </button>
 
-                            <div className="text-[9px] font-extrabold uppercase tracking-wide text-white/40">
-                              {slotPos}
-                            </div>
+                            {/* 마이너/택시는 포지션 라벨 없이 슬롯 번호만 */}
+                            {isMainView ? (
+                              <div className="text-[9px] font-extrabold uppercase tracking-wide text-white/40">
+                                {slotPos}
+                              </div>
+                            ) : (
+                              <div className="text-[9px] font-extrabold uppercase tracking-wide text-white/40">
+                                Slot {slotIndex + 1}
+                              </div>
+                            )}
                             <div className="pr-5 text-[11px] font-black text-white">
                               {slotIndex + 1}. {player.name}
                             </div>
                             <div className="mt-1 flex items-center gap-2 text-[10px] text-white/55">
                               <span>{player.team}</span>
-                              <span>|</span>
-                              <span>${pick.bid ?? "?"}</span>
+                              {isMainView && (
+                                <>
+                                  <span>|</span>
+                                  <span>${pick.bid ?? "?"}</span>
+                                </>
+                              )}
                             </div>
                           </div>
                         );
@@ -250,9 +326,15 @@ export default function DraftRoomBoard({
                             hoverRingClass,
                           ].join(" ")}
                         >
-                          <div className="text-[9px] font-extrabold uppercase tracking-wide text-white/40">
-                            {slotPos}
-                          </div>
+                          {isMainView ? (
+                            <div className="text-[9px] font-extrabold uppercase tracking-wide text-white/40">
+                              {slotPos}
+                            </div>
+                          ) : (
+                            <div className="text-[9px] font-extrabold uppercase tracking-wide text-white/40">
+                              Slot {slotIndex + 1}
+                            </div>
+                          )}
                           <div className="mt-0.5 text-white/30">Empty</div>
                         </div>
                       );
