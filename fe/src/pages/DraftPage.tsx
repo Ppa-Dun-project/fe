@@ -61,6 +61,9 @@ import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
 import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
 import PlayerNotePopover from "../features/draft/components/PlayerNotePopover";
+import CustomizeStatsModal from "../features/draft/components/CustomizeStatsModal";
+import { useStatColumns } from "../features/draft/useStatColumns";
+import { getStatDef } from "../features/draft/statColumns";
 import { useNotificationPolling } from "../hooks/useNotificationPolling";
 import type { NotificationEvent } from "../types/notifications";
 import PlayerInfoModal from "../features/players/components/PlayerInfoModal";
@@ -310,9 +313,12 @@ export default function DraftPage() {
   const positionFilters = DEFAULT_POSITION_FILTERS;
   const showingPitcherColumns = isPitcherPositionFilter(position);
   const sortOptions = showingPitcherColumns ? PITCHER_SORT_OPTIONS : BATTER_SORT_OPTIONS;
-  const statColumnLabels = showingPitcherColumns
-    ? ["ERA", "SO", "W", "SV", "IP"]
-    : ["AVG", "HR", "RBI", "SB", "AB"];
+
+  // 사용자가 선택한 5개 스탯 (타자/투수 별도) — localStorage에 영구 저장.
+  const { batterCols, pitcherCols, setBatterCols, setPitcherCols } = useStatColumns();
+  const [customizeStatsOpen, setCustomizeStatsOpen] = useState(false);
+  const activeStatKeys = showingPitcherColumns ? pitcherCols : batterCols;
+  const statColumnLabels = activeStatKeys.map((k) => getStatDef(k)?.label ?? k);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -823,17 +829,21 @@ export default function DraftPage() {
   //   - 메인: 자격(isEligibleForSlot) 검사 후 이동/스왑.
   //   - 마이너/택시: 포지션 자격이 없으니 순수 재정렬(스왑/빈자리 이동).
   // kind 는 어느 보드의 슬롯을 만지는지 — 같은 kind 내에서만 인덱스 충돌이 발생.
-  const handleSlotReassign = (fromIndex: number, toIndex: number, kind: DraftPickKind) => {
+  // teamId 는 재배치가 일어난 팀 — 내 팀뿐 아니라 opponent 팀의 픽도 사용자가 직접 정리 가능.
+  const handleSlotReassign = (
+    fromIndex: number,
+    toIndex: number,
+    kind: DraftPickKind,
+    teamId: string,
+  ) => {
     if (fromIndex === toIndex) return;
-    const myTeamId = myTeam?.id;
-    if (!myTeamId) return;
 
-    const myPicks = picks.filter(
-      (p) => p.draftedByTeamId === myTeamId && p.kind === kind
+    const teamPicks = picks.filter(
+      (p) => p.draftedByTeamId === teamId && p.kind === kind
     );
-    const fromPick = myPicks.find((p) => p.slotIndex === fromIndex);
+    const fromPick = teamPicks.find((p) => p.slotIndex === fromIndex);
     if (!fromPick) return;
-    const toPick = myPicks.find((p) => p.slotIndex === toIndex);
+    const toPick = teamPicks.find((p) => p.slotIndex === toIndex);
 
     // 마이너/택시: 자격 검사 없이 그냥 스왑/이동.
     if (kind !== "main") {
@@ -1234,7 +1244,6 @@ export default function DraftPage() {
               currentRound={currentRound}
               totalRounds={rosterSize}
               authed={authed}
-              myTeamId={myTeam?.id ?? null}
               view={boardView}
               onViewChange={setBoardView}
               onRemovePick={handleRemovePick}
@@ -1318,6 +1327,15 @@ export default function DraftPage() {
                 Remaining Budget: ${remainingBudget}
               </div>
             )}
+
+            <button
+              type="button"
+              onClick={() => setCustomizeStatsOpen(true)}
+              className="ml-auto rounded-full border border-white/20 bg-white px-3 py-1 text-xs font-extrabold text-zinc-900 transition hover:bg-zinc-100"
+              title="Pick which 5 stats appear in the table"
+            >
+              Customize Stats
+            </button>
           </div>
         </section>
       </FadeIn>
@@ -1547,21 +1565,21 @@ export default function DraftPage() {
                       </span>
                     </div>
 
-                    <div className="text-center text-white/70">
-                      {isPitcherOnly(player) ? formatNumber(player.era, 2) : formatAvg(player.avg)}
-                    </div>
-                    <div className="text-center font-semibold text-amber-300">
-                      {isPitcherOnly(player) ? player.so ?? "-" : player.hr ?? "-"}
-                    </div>
-                    <div className="text-center text-white/70">
-                      {isPitcherOnly(player) ? player.w ?? "-" : player.rbi ?? "-"}
-                    </div>
-                    <div className="text-center font-semibold text-amber-300">
-                      {isPitcherOnly(player) ? player.sv ?? "-" : player.sb ?? "-"}
-                    </div>
-                    <div className="text-center text-white/70">
-                      {isPitcherOnly(player) ? formatNumber(player.ip, 1) : player.ab ?? "-"}
-                    </div>
+                    {(isPitcherOnly(player) ? pitcherCols : batterCols).map((key, colIdx) => {
+                      const def = getStatDef(key);
+                      const value = def ? def.accessor(player) : null;
+                      const display = def ? def.format(value) : "—";
+                      // 짝수 컬럼은 옅은 화이트, 홀수 컬럼은 앰버 강조 — 시선 흐름 유지.
+                      const cellClass =
+                        colIdx % 2 === 0
+                          ? "text-center text-white/70"
+                          : "text-center font-semibold text-amber-300";
+                      return (
+                        <div key={key} className={cellClass}>
+                          {display}
+                        </div>
+                      );
+                    })}
 
                     <div className={`text-center font-black ${ppaValueClass(player.ppaValue, { authed })}`}>
                       {formatPpa(player.ppaValue)}
@@ -1672,6 +1690,18 @@ export default function DraftPage() {
         playerType={profilePlayerType}
         onClose={closePlayerInfo}
       />
+
+      {customizeStatsOpen && (
+        <CustomizeStatsModal
+          onClose={() => setCustomizeStatsOpen(false)}
+          batterCols={batterCols}
+          pitcherCols={pitcherCols}
+          onSave={(group, cols) => {
+            if (group === "batter") setBatterCols(cols);
+            else setPitcherCols(cols);
+          }}
+        />
+      )}
 
       {noteTarget && (
         <PlayerNotePopover
