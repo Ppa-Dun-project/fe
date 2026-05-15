@@ -137,6 +137,16 @@ export interface SessionDetail {
 }
 
 /**
+ * PlayerNote: 선수 메모. 세션당 (session_id, player_id) 조합으로 유니크.
+ * - GET /api/draft/sessions/{id}/notes 응답 items 요소
+ */
+export type PlayerNote = {
+  playerId: string;
+  note: string;
+  updatedAt: string;
+};
+
+/**
  * DraftSort: 드래프트 페이지의 정렬 옵션
  * - _desc: 내림차순 (높은 것부터)
  * - _asc: 오름차순
