@@ -61,12 +61,6 @@ export default function LoginPage() {
 
         {/* Google 로그인 버튼이 여기에 렌더링됨 (useGoogleSignIn이 처리) */}
         <div ref={buttonRef} className="mt-6 w-full opacity-85 transition hover:opacity-100" />
-
-        {/* 로그인 후 이동할 경로 표시 (디버그/안내용) */}
-        <div className="mt-4 rounded-2xl border border-white/10 bg-black/20 p-4">
-          <div className="text-xs text-white/50">Redirect after login</div>
-          <div className="mt-1 break-all font-mono text-xs text-white/80">{redirect}</div>
-        </div>
       </div>
     </div>
   );
