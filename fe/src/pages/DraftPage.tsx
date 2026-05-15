@@ -72,7 +72,6 @@ import LoginPromptModal from "../features/auth/LoginPromptModal";
 const PAGE_SIZE = 30;
 
 const DEFAULT_POSITION_FILTERS: DraftPositionFilter[] = [
-  "ALL",
   "C",
   "1B",
   "2B",
@@ -84,7 +83,6 @@ const DEFAULT_POSITION_FILTERS: DraftPositionFilter[] = [
 ];
 
 // Match a player against a position filter.
-// - ALL   : always true
 // - UTIL  : any non-pitcher position (1B/2B/3B/SS/OF/C/UTIL all qualify)
 // - P     : any pitcher position (SP or RP)
 // - other : exact match (case-insensitive, defensive against empty arrays)
@@ -92,7 +90,6 @@ function matchesPositionFilter(
   playerPositions: readonly string[] | undefined,
   filter: DraftPositionFilter
 ): boolean {
-  if (filter === "ALL") return true;
   if (!playerPositions || playerPositions.length === 0) return false;
 
   const normalized = playerPositions.map((p) => p.toUpperCase());
@@ -303,7 +300,7 @@ export default function DraftPage() {
   const [playerValues, setPlayerValues] = useState<DraftPlayerValue[] | null>(null);
 
   const [query, setQuery] = useState(() => searchParams.get("query")?.trim() ?? "");
-  const [position, setPosition] = useState<DraftPositionFilter>("ALL");
+  const [position, setPosition] = useState<DraftPositionFilter>("C");
   const [sort, setSort] = useState<DraftSort>("score_desc");
   const [page, setPage] = useState(1);
 
@@ -375,9 +372,7 @@ export default function DraftPage() {
       );
     }
 
-    if (position !== "ALL") {
-      result = result.filter((p) => matchesPositionFilter(p.positions, position));
-    }
+    result = result.filter((p) => matchesPositionFilter(p.positions, position));
 
     const sorted = [...result].sort((a, b) => {
       switch (sort) {
@@ -550,10 +545,29 @@ export default function DraftPage() {
     }
   };
 
-  // 진행 중인 미저장 draft 폐기 — localStorage 비우고 player browser 상태로 복귀.
-  // 저장된 세션(isLoadedMode)은 이 버튼 자체가 노출되지 않으므로 분기 필요 없음.
+  // Discard — 모드별로 동작 분기.
+  //  - 미저장 모드: localStorage 비우고 default 상태로 복귀 (기존 동작)
+  //  - 로드 모드 : 현재 세션의 픽만 비움 (세션·설정·이름·노트는 유지). 서버에 PUT 으로 반영.
   const handleDiscardDraft = () => {
     if (!window.confirm("Discard the current draft? This cannot be undone.")) return;
+
+    if (isLoadedMode && sessionId !== null && config !== null) {
+      const loadedConfig = config;
+      apiPutAuth<SessionDetail, { name: string; picks: DraftPick[] }>(
+        `/api/draft/sessions/${sessionId}`,
+        { name: sessionName ?? "Draft Room", picks: [] }
+      )
+        .then(() => {
+          resetPicks([]);
+          setTeams(buildTeamsFromConfig(loadedConfig));
+        })
+        .catch((err: unknown) => {
+          console.error("Failed to discard picks:", err);
+          window.alert("Failed to discard picks. Please try again.");
+        });
+      return;
+    }
+
     try {
       localStorage.removeItem(UNSAVED_DRAFT_KEY);
     } catch {
@@ -1147,12 +1161,16 @@ export default function DraftPage() {
                 </button>
               </>
             )}
-            {hasDraftConfig && !isLoadedMode && (
+            {hasDraftConfig && (
               <button
                 type="button"
                 onClick={handleDiscardDraft}
                 className="rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm font-black text-rose-200 transition hover:bg-rose-500/20"
-                title="Discard the current unsaved draft and start over"
+                title={
+                  isLoadedMode
+                    ? "Clear all picks of the current saved session"
+                    : "Discard the current unsaved draft and start over"
+                }
               >
                 Discard
               </button>
