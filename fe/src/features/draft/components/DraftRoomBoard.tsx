@@ -10,16 +10,21 @@ type Props = {
   currentRound: number;
   totalRounds: number;
   authed: boolean;
-  myTeamId: string | null;
   view: DraftPickKind;                    // 현재 보고 있는 보드
   onViewChange: (next: DraftPickKind) => void;
   onRemovePick: (pick: DraftPick) => void;
-  // 내 팀 안에서 드래그-드롭으로 슬롯 인덱스를 바꿀 때 호출.
+  // 한 팀 안에서 드래그-드롭으로 슬롯 인덱스를 바꿀 때 호출. (내 팀 + 상대 팀 모두)
+  // teamId 는 드래그가 일어난 팀 — 호출자가 어떤 팀의 픽을 재배치할지 결정하는 데 사용.
   // 마이너/택시는 자격 검사 없이 순수 재정렬.
-  onSlotReassign?: (fromIndex: number, toIndex: number, kind: DraftPickKind) => void;
+  onSlotReassign?: (
+    fromIndex: number,
+    toIndex: number,
+    kind: DraftPickKind,
+    teamId: string,
+  ) => void;
 };
 
-// Drag payload: 자기 팀의 어떤 슬롯에서 출발했는지.
+// Drag payload: { teamId, slotIndex } JSON. teamId 가 일치할 때만 drop 을 허용.
 const DRAG_MIME = "application/x-ppadun-slot";
 
 // 보드 탭. 항상 3개 모두 노출하고 현재 view 만 강조.
@@ -44,7 +49,6 @@ export default function DraftRoomBoard({
   currentRound,
   totalRounds,
   authed,
-  myTeamId,
   view,
   onViewChange,
   onRemovePick,
@@ -52,10 +56,14 @@ export default function DraftRoomBoard({
 }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // 드래그 진행 중인 출발 슬롯 (내 팀 한정).
-  const [draggingFrom, setDraggingFrom] = useState<number | null>(null);
+  // 드래그 진행 중인 출발 슬롯 — 팀 안에서만 재배치하므로 teamId 도 함께 기억.
+  const [draggingFrom, setDraggingFrom] = useState<{ teamId: string; index: number } | null>(null);
   // 드래그가 hover 중인 슬롯 — 자격 여부에 따라 테두리 색을 다르게 칠한다.
-  const [hoverTarget, setHoverTarget] = useState<{ index: number; ok: boolean } | null>(null);
+  const [hoverTarget, setHoverTarget] = useState<{
+    teamId: string;
+    index: number;
+    ok: boolean;
+  } | null>(null);
 
   // 현재 보드에 해당하는 픽만 추려서 팀별로 정렬.
   const picksByTeam = useMemo(() => {
@@ -96,13 +104,15 @@ export default function DraftRoomBoard({
 
   // 출발 슬롯의 player 가 target 슬롯에 자격이 있는지 확인 (메인만 의미 있음).
   // 마이너/택시는 슬롯 자격 자체가 없으니 항상 OK.
-  const isHoverEligible = (toIndex: number): boolean => {
-    if (draggingFrom === null || !myTeamId) return false;
-    if (draggingFrom === toIndex) return true;
+  // teamId 는 hover 대상 팀 — 출발 팀과 같지 않으면 드롭 불가.
+  const isHoverEligible = (teamId: string, toIndex: number): boolean => {
+    if (draggingFrom === null) return false;
+    if (draggingFrom.teamId !== teamId) return false;
+    if (draggingFrom.index === toIndex) return true;
     if (view !== "main") return true;
 
-    const fromPick = (picksByTeam.get(myTeamId) ?? []).find(
-      (p) => p.slotIndex === draggingFrom
+    const fromPick = (picksByTeam.get(teamId) ?? []).find(
+      (p) => p.slotIndex === draggingFrom.index
     );
     if (!fromPick) return false;
     const player = playersById[fromPick.playerId];
@@ -189,7 +199,6 @@ export default function DraftRoomBoard({
             {teams.map((team, idx) => {
               const accent = teamAccentClass(team, idx);
               const teamPicks = picksByTeam.get(team.id) ?? [];
-              const isMyTeam = team.id === myTeamId;
 
               return (
                 <div
@@ -210,8 +219,9 @@ export default function DraftRoomBoard({
                       const pick = teamPicks.find((p) => p.slotIndex === slotIndex);
                       const player = pick ? playersById[pick.playerId] : null;
 
-                      // 자기 팀 슬롯만 DnD 활성.
-                      const hovered = hoverTarget?.index === slotIndex;
+                      // DnD 는 모든 팀에서 활성. 단, 출발-목적 팀이 같아야 drop 허용.
+                      const hovered =
+                        hoverTarget?.teamId === team.id && hoverTarget?.index === slotIndex;
                       const hoverOk = hovered && hoverTarget?.ok === true;
                       const hoverBad = hovered && hoverTarget?.ok === false;
                       const hoverRingClass = hoverOk
@@ -220,64 +230,74 @@ export default function DraftRoomBoard({
                         ? "ring-2 ring-rose-400/60"
                         : "";
 
-                      const dndProps = isMyTeam
-                        ? {
-                            onDragOver: (e: React.DragEvent) => {
-                              if (draggingFrom === null) return;
-                              e.preventDefault();
-                              e.dataTransfer.dropEffect = "move";
-                              const ok = isHoverEligible(slotIndex);
-                              if (hoverTarget?.index !== slotIndex || hoverTarget?.ok !== ok) {
-                                setHoverTarget({ index: slotIndex, ok });
-                              }
-                            },
-                            onDragLeave: () => {
-                              if (hoverTarget?.index === slotIndex) {
-                                setHoverTarget(null);
-                              }
-                            },
-                            onDrop: (e: React.DragEvent) => {
-                              e.preventDefault();
-                              const raw = e.dataTransfer.getData(DRAG_MIME);
-                              setHoverTarget(null);
-                              setDraggingFrom(null);
-                              if (!raw) return;
-                              const fromIndex = Number(raw);
-                              if (Number.isFinite(fromIndex)) {
-                                onSlotReassign?.(fromIndex, slotIndex, view);
-                              }
-                            },
+                      const dndProps = {
+                        onDragOver: (e: React.DragEvent) => {
+                          if (draggingFrom === null) return;
+                          // 다른 팀에서 출발한 드래그는 받지 않음 — preventDefault 안 하면 "no-drop" 커서.
+                          if (draggingFrom.teamId !== team.id) return;
+                          e.preventDefault();
+                          e.dataTransfer.dropEffect = "move";
+                          const ok = isHoverEligible(team.id, slotIndex);
+                          if (
+                            hoverTarget?.teamId !== team.id ||
+                            hoverTarget?.index !== slotIndex ||
+                            hoverTarget?.ok !== ok
+                          ) {
+                            setHoverTarget({ teamId: team.id, index: slotIndex, ok });
                           }
-                        : {};
+                        },
+                        onDragLeave: () => {
+                          if (
+                            hoverTarget?.teamId === team.id &&
+                            hoverTarget?.index === slotIndex
+                          ) {
+                            setHoverTarget(null);
+                          }
+                        },
+                        onDrop: (e: React.DragEvent) => {
+                          e.preventDefault();
+                          const raw = e.dataTransfer.getData(DRAG_MIME);
+                          setHoverTarget(null);
+                          setDraggingFrom(null);
+                          if (!raw) return;
+                          try {
+                            const parsed = JSON.parse(raw) as {
+                              teamId?: unknown;
+                              slotIndex?: unknown;
+                            };
+                            if (parsed.teamId !== team.id) return;
+                            if (typeof parsed.slotIndex !== "number") return;
+                            if (!Number.isFinite(parsed.slotIndex)) return;
+                            onSlotReassign?.(parsed.slotIndex, slotIndex, view, team.id);
+                          } catch {
+                            // ignore malformed payload
+                          }
+                        },
+                      };
 
                       if (pick && player) {
                         return (
                           <div
                             key={`${team.id}-${slotIndex}`}
-                            draggable={isMyTeam}
-                            onDragStart={
-                              isMyTeam
-                                ? (e: React.DragEvent) => {
-                                    e.dataTransfer.setData(DRAG_MIME, String(slotIndex));
-                                    e.dataTransfer.effectAllowed = "move";
-                                    setDraggingFrom(slotIndex);
-                                  }
-                                : undefined
-                            }
-                            onDragEnd={
-                              isMyTeam
-                                ? () => {
-                                    setDraggingFrom(null);
-                                    setHoverTarget(null);
-                                  }
-                                : undefined
-                            }
+                            draggable
+                            onDragStart={(e: React.DragEvent) => {
+                              e.dataTransfer.setData(
+                                DRAG_MIME,
+                                JSON.stringify({ teamId: team.id, slotIndex }),
+                              );
+                              e.dataTransfer.effectAllowed = "move";
+                              setDraggingFrom({ teamId: team.id, index: slotIndex });
+                            }}
+                            onDragEnd={() => {
+                              setDraggingFrom(null);
+                              setHoverTarget(null);
+                            }}
                             {...dndProps}
                             className={[
                               // 픽 카드 색은 픽을 가진 팀의 accent 로 통일 — 내 팀(sky) / 각 opponent 의 고유 색.
                               "relative rounded-xl border px-3 py-2 text-left transition",
                               accent.slot,
-                              isMyTeam ? "cursor-grab active:cursor-grabbing" : "",
+                              "cursor-grab active:cursor-grabbing",
                               hoverRingClass,
                             ].join(" ")}
                           >
