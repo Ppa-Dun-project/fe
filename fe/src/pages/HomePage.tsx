@@ -66,7 +66,7 @@ export default function HomePage() {
     };
 
     fetchNews();
-    const interval = setInterval(fetchNews, 60 * 60 * 1000); // 1시간마다
+    const interval = setInterval(fetchNews, 10 * 60 * 1000); // 10분마다
     return () => clearInterval(interval);
   }, []);
 
