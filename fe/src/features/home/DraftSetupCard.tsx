@@ -63,8 +63,10 @@ const POSITION_ORDER: RosterSlotPosition[] = [
   "C", "1B", "2B", "3B", "SS", "OF", "UTIL", "SP", "RP", "BENCH",
 ];
 
-// 사용자가 슬롯 합계를 정확히 이 값과 맞춰야 Start Draft 가 활성화된다.
-const TARGET_ROSTER_SIZE = sumRosterSlots(DEFAULT_ROSTER_SLOTS);
+// AL / NL 은 표준 16 슬롯으로 고정 (사용자가 16 안에서 배분만 가능).
+// Custom 은 완전 자유 — 최소 1 명만 채우면 OK.
+const TARGET_ROSTER_SIZE = sumRosterSlots(DEFAULT_ROSTER_SLOTS); // = 16
+const MIN_ROSTER_SIZE = 1;
 
 const POSITION_LABEL: Record<RosterSlotPosition, string> = {
   C: "C",
@@ -126,9 +128,16 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
     }));
   };
 
-  // 슬롯 합계가 정확히 TARGET_ROSTER_SIZE 와 일치해야 시작 가능.
+  // 리그별 검증:
+  //   AL / NL → 합계 정확히 TARGET_ROSTER_SIZE (16)
+  //   custom  → 합계 ≥ MIN_ROSTER_SIZE (1)
+  const isCustomLeague = leagueType === "custom";
   const rosterDelta = rosterPlayers - TARGET_ROSTER_SIZE;
-  const canStart = rosterDelta === 0;
+  const canStart = isCustomLeague
+    ? rosterPlayers >= MIN_ROSTER_SIZE
+    : rosterDelta === 0;
+
+  const resetRosterSlots = () => setRosterSlots(DEFAULT_ROSTER_SLOTS);
 
   const onStartDraft = () => {
     if (!canStart) return;
@@ -279,14 +288,28 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
         </div>
 
         <div className="rounded-2xl border border-white/10 bg-black/20 p-3">
-          <div className="flex items-center justify-between">
+          <div className="flex items-center justify-between gap-2">
             <div className="text-xs font-extrabold text-white/70">Roster slots by position</div>
-            <div className="text-xs font-black">
-              <span className="text-white/70">Total: </span>
-              <span className={canStart ? "text-emerald-300" : "text-rose-300"}>
-                {rosterPlayers}
-              </span>
-              <span className="text-white/40"> / {TARGET_ROSTER_SIZE}</span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={resetRosterSlots}
+                className="rounded-lg border border-white/15 bg-black/30 px-2 py-1 text-[11px] font-black text-white/75 transition hover:bg-white/10"
+                title="Reset roster slots to the default 16-player layout"
+              >
+                Reset
+              </button>
+              <div className="text-xs font-black">
+                <span className="text-white/70">Total: </span>
+                <span className={canStart ? "text-emerald-300" : "text-rose-300"}>
+                  {rosterPlayers}
+                </span>
+                {isCustomLeague ? (
+                  <span className="text-white/40">{rosterPlayers === 1 ? " player" : " players"}</span>
+                ) : (
+                  <span className="text-white/40"> / {TARGET_ROSTER_SIZE}</span>
+                )}
+              </div>
             </div>
           </div>
 
@@ -334,9 +357,11 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
 
         {!canStart && (
           <div className="text-center text-xs text-rose-300">
-            {rosterDelta < 0
-              ? `Add ${-rosterDelta} more roster slot${-rosterDelta === 1 ? "" : "s"} to reach ${TARGET_ROSTER_SIZE} players.`
-              : `Remove ${rosterDelta} roster slot${rosterDelta === 1 ? "" : "s"} to fit ${TARGET_ROSTER_SIZE} players.`}
+            {isCustomLeague
+              ? "Add at least one roster slot to start the draft."
+              : rosterDelta < 0
+                ? `Add ${-rosterDelta} more roster slot${-rosterDelta === 1 ? "" : "s"} to reach ${TARGET_ROSTER_SIZE} players.`
+                : `Remove ${rosterDelta} roster slot${rosterDelta === 1 ? "" : "s"} to fit ${TARGET_ROSTER_SIZE} players.`}
           </div>
         )}
 
