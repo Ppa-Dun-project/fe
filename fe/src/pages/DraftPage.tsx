@@ -84,13 +84,14 @@ const DEFAULT_POSITION_FILTERS: DraftPositionFilter[] = [
   "SS",
   "OF",
   "UTIL",
-  "P",
+  "SP",
+  "RP",
 ];
 
 // Match a player against a position filter.
-// - UTIL  : any non-pitcher position (1B/2B/3B/SS/OF/C/UTIL all qualify)
-// - P     : any pitcher position (SP or RP)
-// - other : exact match (case-insensitive, defensive against empty arrays)
+// 모든 필터는 정확한 포지션 일치 — UTIL 칩은 "UTIL 자격이 있는 선수"만 골라낸다.
+// (예전엔 UTIL 이 "투수가 아닌 모든 선수"였는데, 그건 사실상 "전체 타자" 필터라
+//  포지션 칩의 의미와 맞지 않아 정확 일치로 바꿈.)
 function matchesPositionFilter(
   playerPositions: readonly string[] | undefined,
   filter: DraftPositionFilter
@@ -98,13 +99,6 @@ function matchesPositionFilter(
   if (!playerPositions || playerPositions.length === 0) return false;
 
   const normalized = playerPositions.map((p) => p.toUpperCase());
-
-  if (filter === "UTIL") {
-    return normalized.some((p) => p !== "SP" && p !== "RP");
-  }
-  if (filter === "P") {
-    return normalized.some((p) => p === "SP" || p === "RP");
-  }
   return normalized.includes(filter);
 }
 
@@ -113,7 +107,7 @@ function isPitcherOnly(player: DraftPlayerPublic): boolean {
 }
 
 function isPitcherPositionFilter(filter: DraftPositionFilter): boolean {
-  return filter === "P" || filter === "SP" || filter === "RP";
+  return filter === "SP" || filter === "RP";
 }
 
 function formatNumber(value: number | null | undefined, digits: number) {
