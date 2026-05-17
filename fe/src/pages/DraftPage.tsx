@@ -116,6 +116,10 @@ export default function DraftPage() {
   const [setupModalOpen, setSetupModalOpen] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
 
+  // "New" → "Save first?" Yes 경로에서 Save 가 끝난 직후 setup 모달을
+  // 자동으로 열기 위한 플래그. Save 모달이 cancel 되면 클리어.
+  const [postSaveAction, setPostSaveAction] = useState<"setup" | null>(null);
+
   // Toast queue. id 는 monotonic counter 로 부여한다.
   const toastIdRef = useRef(0);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
@@ -440,6 +444,49 @@ export default function DraftPage() {
       setSetupModalOpen(true);
     } else {
       setLoginModalOpen(true);
+    }
+  };
+
+  // 모든 로컬 상태 / sessionStorage 를 초기화해 "갓 들어온" 상태로 만든 다음
+  // setup 모달을 띄움. 로드 모드였다면 URL 도 /draft 로 바꿔서 사이드 효과 차단.
+  const resetToFreshSetup = () => {
+    try {
+      removeUnsavedDraftStorage();
+    } catch {
+      // 무시
+    }
+    if (isLoadedMode) {
+      navigate("/draft", { replace: true });
+    }
+    setConfig(DEFAULT_DRAFT_CONFIG);
+    setTeams(buildTeamsFromConfig(DEFAULT_DRAFT_CONFIG));
+    resetPicks([]);
+    setNotes({});
+    setHasDraftConfig(false);
+    setSessionName(null);
+    setSetupModalOpen(true);
+  };
+
+  // New 버튼 — 현재 드래프트를 정리하고 새로 시작하는 setup 모달을 띄움.
+  //   - 로드된 세션 (isLoadedMode): 이미 DB 에 저장돼 있으니 즉시 setup.
+  //   - 미저장 드래프트: 저장 여부를 묻는 confirm 후 Yes/No 분기.
+  const handleNewDraft = () => {
+    if (isLoadedMode) {
+      resetToFreshSetup();
+      return;
+    }
+
+    const saveFirst = window.confirm(
+      "Save the current draft before starting a new one?\n\n" +
+        "OK → save first, then open new setup\n" +
+        "Cancel → discard current draft and open new setup"
+    );
+
+    if (saveFirst) {
+      setPostSaveAction("setup");
+      openSaveModal();
+    } else {
+      resetToFreshSetup();
     }
   };
 
@@ -823,6 +870,8 @@ export default function DraftPage() {
   const closeSaveModal = () => {
     setSaveModalOpen(false);
     setSaveError(null);
+    // 사용자가 Save 를 취소하면 chained post-save action 도 함께 폐기.
+    setPostSaveAction(null);
   };
 
   const handleSaveConfirm = () => {
@@ -843,7 +892,14 @@ export default function DraftPage() {
       )
         .then((data) => {
           setSessionName(data.name);
+          // closeSaveModal 은 postSaveAction 도 클리어하므로, chain 동작이
+          // 예약돼 있었다면 그 사실을 먼저 캡처한 뒤 닫는다.
+          const chained = postSaveAction;
           closeSaveModal();
+          if (chained === "setup") {
+            // 저장된 세션을 그대로 두고 새 setup 으로 이동.
+            resetToFreshSetup();
+          }
         })
         .catch((err: unknown) => {
           console.error(err);
@@ -881,7 +937,16 @@ export default function DraftPage() {
         }
         setSaving(false);
         setSaveModalOpen(false);
-        navigate(`/draft/${data.id}`, { replace: true });
+
+        if (postSaveAction === "setup") {
+          // "New" 흐름에서 Yes-save 를 거친 경우 — 새로 만든 세션 URL 로
+          // 이동하지 않고, 곧바로 새 setup 모달을 띄운다. (세션은 DB 에
+          // 저장돼 있으므로 추후 Import 에서 다시 열 수 있다.)
+          setPostSaveAction(null);
+          resetToFreshSetup();
+        } else {
+          navigate(`/draft/${data.id}`, { replace: true });
+        }
       })
       .catch((err: unknown) => {
         setSaving(false);
@@ -964,8 +1029,10 @@ export default function DraftPage() {
         onUndo={undoPicks}
         onRedo={redoPicks}
         onDiscard={handleDiscardDraft}
+        onNew={handleNewDraft}
         onSave={openSaveModal}
         onImport={openImportModal}
+        onStartDraft={openStartDraft}
       />
 
       <FadeIn delayMs={60}>
@@ -991,16 +1058,9 @@ export default function DraftPage() {
               </div>
               <div className="mt-2 text-sm text-white/60">
                 {authed
-                  ? "Set up your league to start the live draft board."
-                  : "Sign in and set up your league to start the live draft board."}
+                  ? "Use the Start Draft button above to set up your league."
+                  : "Sign in and use the Start Draft button above to set up your league."}
               </div>
-              <button
-                type="button"
-                onClick={openStartDraft}
-                className="mt-6 inline-flex items-center justify-center rounded-2xl bg-white px-8 py-4 text-base font-black text-black transition hover:-translate-y-px hover:bg-white/90 active:translate-y-0"
-              >
-                Start Your Draft
-              </button>
             </section>
           )}
         </div>

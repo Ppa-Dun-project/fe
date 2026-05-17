@@ -18,8 +18,14 @@ type Props = {
   onUndo: () => void;
   onRedo: () => void;
   onDiscard: () => void;
+  // New = wipe current local state and start a fresh setup. The parent
+  // decides whether to prompt for a save first.
+  onNew: () => void;
   onSave: () => void;
   onImport: () => void;
+  // Start Draft = open the setup modal (or login modal if not authed).
+  // Only rendered when there is no draft in progress.
+  onStartDraft: () => void;
 };
 
 export default function DraftHeaderBar({
@@ -35,8 +41,10 @@ export default function DraftHeaderBar({
   onUndo,
   onRedo,
   onDiscard,
+  onNew,
   onSave,
   onImport,
+  onStartDraft,
 }: Props) {
   return (
     <FadeIn>
@@ -102,6 +110,16 @@ export default function DraftHeaderBar({
               Discard
             </button>
           )}
+          {hasDraftConfig && (
+            <button
+              type="button"
+              onClick={onNew}
+              className="rounded-2xl border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-sm font-black text-sky-200 transition hover:bg-sky-500/20"
+              title="Start a fresh draft session (re-configure budget / teams / roster)"
+            >
+              New
+            </button>
+          )}
           {authed && (
             <>
               {hasDraftConfig && (
@@ -123,6 +141,21 @@ export default function DraftHeaderBar({
                 Import
               </button>
             </>
+          )}
+
+          {!hasDraftConfig && (
+            <button
+              type="button"
+              onClick={onStartDraft}
+              className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-black transition hover:bg-zinc-100"
+              title={
+                authed
+                  ? "Configure budget / teams and start a live draft"
+                  : "Sign in to start a draft"
+              }
+            >
+              Start Draft
+            </button>
           )}
 
           {hasDraftConfig && (
