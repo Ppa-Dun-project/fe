@@ -193,9 +193,9 @@ export type DraftSort =
  * DraftPositionFilter: 포지션 필터 옵션
  * - "ALL" 은 의도적으로 제외 — 타자/투수 스탯이 분리되어 한 화면에 섞으면
  *   빈 컬럼이 생기기 때문 ("pick 5 stat columns" 기능 대비).
+ * - "P" 는 의도적으로 제외 — 투수는 SP / RP 로만 필터.
  */
 export type DraftPositionFilter =
-  | "P"        // 투수 전체 (SP + RP)
   | "SP"       // 선발 투수
   | "RP"       // 구원 투수
   | "C"        // 포수
