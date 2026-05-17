@@ -60,6 +60,7 @@ import {
   primaryRateSortValue,
   productionSortValue,
   removeUnsavedDraftStorage,
+  setActiveDraftSessionId,
   speedSortValue,
   type DraftPlayersResponse,
   type DraftPlayerValuesResponse,
@@ -547,6 +548,17 @@ export default function DraftPage() {
     setNotes,
     resetPicks,
   });
+
+  // My Team 페이지가 "현재 활성 드래프트 세션" 을 알도록 sessionStorage 에 mirror.
+  // 로드 모드 → 그 sessionId, 미저장(또는 fresh) → null.
+  // → My Team 페이지가 옛 URL ?sessionId 로 잘못된 세션을 보여주는 문제 차단.
+  useEffect(() => {
+    if (isLoadedMode && sessionId !== null) {
+      setActiveDraftSessionId(sessionId);
+    } else {
+      setActiveDraftSessionId(null);
+    }
+  }, [isLoadedMode, sessionId]);
 
   // 미저장 모드에서 picks/notes 가 바뀔 때마다 sessionStorage 에도 sync — 페이지 이동/새로고침 보호.
   useEffect(() => {

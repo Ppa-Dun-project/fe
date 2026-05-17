@@ -127,6 +127,34 @@ export function removeUnsavedDraftStorage() {
   localStorage.removeItem(UNSAVED_DRAFT_KEY);
 }
 
+// "현재 드래프트 페이지에서 보고 있는 세션 id" 를 페이지 간에 공유.
+// My Team 페이지가 이를 우선 source-of-truth 로 써서 stale URL ?sessionId
+// 때문에 옛 세션의 픽을 보여주는 문제를 막는다.
+//   - 로드 모드 (/draft/:id) 진입 → setActiveDraftSessionId(id)
+//   - 미저장 모드 / discard 후 빈 상태 / "New" 후 reset → setActiveDraftSessionId(null)
+//   - 미저장을 저장(POST) 한 직후 → setActiveDraftSessionId(newId)
+const ACTIVE_DRAFT_SESSION_KEY = "ppadun_active_draft_session_id";
+
+export function setActiveDraftSessionId(id: number | null) {
+  try {
+    if (id === null) sessionStorage.removeItem(ACTIVE_DRAFT_SESSION_KEY);
+    else sessionStorage.setItem(ACTIVE_DRAFT_SESSION_KEY, String(id));
+  } catch {
+    // quota / privacy mode — 무시
+  }
+}
+
+export function getActiveDraftSessionId(): number | null {
+  try {
+    const raw = sessionStorage.getItem(ACTIVE_DRAFT_SESSION_KEY);
+    if (!raw) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n > 0 ? n : null;
+  } catch {
+    return null;
+  }
+}
+
 export function readUnsavedDraftStorage(): string | null {
   const current = sessionStorage.getItem(UNSAVED_DRAFT_KEY);
   if (current) return current;
