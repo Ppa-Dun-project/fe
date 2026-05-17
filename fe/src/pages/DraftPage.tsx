@@ -74,6 +74,7 @@ import PlayerComparisonModal from "../features/draft/components/PlayerComparison
 import PlayerNotePopover from "../features/draft/components/PlayerNotePopover";
 import CustomizeStatsModal from "../features/draft/components/CustomizeStatsModal";
 import SaveSessionModal from "../features/draft/components/SaveSessionModal";
+import NewDraftConfirmModal from "../features/draft/components/NewDraftConfirmModal";
 import ImportSessionsModal from "../features/draft/components/ImportSessionsModal";
 import PlayerListTable from "../features/draft/components/PlayerListTable";
 import DraftHeaderBar from "../features/draft/components/DraftHeaderBar";
@@ -119,6 +120,9 @@ export default function DraftPage() {
   // "New" → "Save first?" Yes 경로에서 Save 가 끝난 직후 setup 모달을
   // 자동으로 열기 위한 플래그. Save 모달이 cancel 되면 클리어.
   const [postSaveAction, setPostSaveAction] = useState<"setup" | null>(null);
+
+  // "New" 클릭 시 띄우는 3-버튼 확인 모달 — 미저장 상태에서만 사용.
+  const [newConfirmOpen, setNewConfirmOpen] = useState(false);
 
   // Toast queue. id 는 monotonic counter 로 부여한다.
   const toastIdRef = useRef(0);
@@ -469,25 +473,30 @@ export default function DraftPage() {
 
   // New 버튼 — 현재 드래프트를 정리하고 새로 시작하는 setup 모달을 띄움.
   //   - 로드된 세션 (isLoadedMode): 이미 DB 에 저장돼 있으니 즉시 setup.
-  //   - 미저장 드래프트: 저장 여부를 묻는 confirm 후 Yes/No 분기.
+  //   - 미저장 드래프트: 3-버튼 확인 모달 (Save first / Discard current / Cancel)
+  //     로 분기. Cancel 은 진짜 abort — 드래프트 상태 변경 없음.
   const handleNewDraft = () => {
     if (isLoadedMode) {
       resetToFreshSetup();
       return;
     }
+    setNewConfirmOpen(true);
+  };
 
-    const saveFirst = window.confirm(
-      "Save the current draft before starting a new one?\n\n" +
-        "OK → save first, then open new setup\n" +
-        "Cancel → discard current draft and open new setup"
-    );
+  const handleNewConfirmSaveFirst = () => {
+    setNewConfirmOpen(false);
+    setPostSaveAction("setup");
+    openSaveModal();
+  };
 
-    if (saveFirst) {
-      setPostSaveAction("setup");
-      openSaveModal();
-    } else {
-      resetToFreshSetup();
-    }
+  const handleNewConfirmDiscard = () => {
+    setNewConfirmOpen(false);
+    resetToFreshSetup();
+  };
+
+  const handleNewConfirmCancel = () => {
+    // 진짜 cancel — 아무 상태도 변경하지 않음.
+    setNewConfirmOpen(false);
   };
 
   // 진행 중인 미저장 draft 폐기 — sessionStorage 비우고 player browser 상태로 복귀.
@@ -1113,6 +1122,7 @@ export default function DraftPage() {
         loading={loading}
         error={error}
         authed={authed}
+        hasDraftConfig={hasDraftConfig}
         notes={notes}
         affectedPlayerIds={affectedPlayerIds}
         compareAId={compareAId}
@@ -1207,6 +1217,14 @@ export default function DraftPage() {
           onClose={closeImportModal}
           onPick={handleSessionPick}
           onDelete={handleSessionDelete}
+        />
+      )}
+
+      {newConfirmOpen && (
+        <NewDraftConfirmModal
+          onSaveFirst={handleNewConfirmSaveFirst}
+          onDiscardCurrent={handleNewConfirmDiscard}
+          onCancel={handleNewConfirmCancel}
         />
       )}
 

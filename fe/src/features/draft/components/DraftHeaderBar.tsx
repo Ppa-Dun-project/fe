@@ -99,6 +99,16 @@ export default function DraftHeaderBar({
           {hasDraftConfig && (
             <button
               type="button"
+              onClick={onNew}
+              className="rounded-2xl border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-sm font-black text-sky-200 transition hover:bg-sky-500/20"
+              title="Start a fresh draft session (re-configure budget / teams / roster)"
+            >
+              New
+            </button>
+          )}
+          {hasDraftConfig && (
+            <button
+              type="button"
               onClick={onDiscard}
               className="rounded-2xl border border-rose-400/30 bg-rose-500/10 px-4 py-3 text-sm font-black text-rose-200 transition hover:bg-rose-500/20"
               title={
@@ -108,16 +118,6 @@ export default function DraftHeaderBar({
               }
             >
               Discard
-            </button>
-          )}
-          {hasDraftConfig && (
-            <button
-              type="button"
-              onClick={onNew}
-              className="rounded-2xl border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-sm font-black text-sky-200 transition hover:bg-sky-500/20"
-              title="Start a fresh draft session (re-configure budget / teams / roster)"
-            >
-              New
             </button>
           )}
           {authed && (

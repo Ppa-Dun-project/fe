@@ -37,6 +37,7 @@ type Props = {
   loading: boolean;
   error: string | null;
   authed: boolean;
+  hasDraftConfig: boolean;
   notes: Record<string, string>;
   affectedPlayerIds: Set<string>;
   compareAId: string | null;
@@ -62,6 +63,7 @@ export default function PlayerListTable({
   loading,
   error,
   authed,
+  hasDraftConfig,
   notes,
   affectedPlayerIds,
   compareAId,
@@ -228,25 +230,31 @@ export default function PlayerListTable({
                       <div className={`rounded-xl border px-3 py-2 text-xs font-black ${pickedAccent?.header ?? ""}`}>
                         {status.label}
                       </div>
-                    ) : authed ? (
+                    ) : !authed ? (
+                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black text-white/40 blur-[1px]">
+                        Sign in required
+                      </div>
+                    ) : (
                       <>
                         <button
+                          type="button"
+                          disabled={!hasDraftConfig}
                           onClick={() => onAddPick(player)}
-                          className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-200 ring-1 ring-emerald-400/20 transition hover:bg-emerald-500/25"
+                          title={hasDraftConfig ? "Add to my team" : "Start a draft to make picks"}
+                          className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-200 ring-1 ring-emerald-400/20 transition hover:bg-emerald-500/25 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-emerald-500/15"
                         >
                           Add
                         </button>
                         <button
+                          type="button"
+                          disabled={!hasDraftConfig}
                           onClick={() => onTakenPick(player)}
-                          className="rounded-xl bg-rose-500/15 px-3 py-2 text-xs font-black text-rose-200 ring-1 ring-rose-400/20 transition hover:bg-rose-500/25"
+                          title={hasDraftConfig ? "Mark as drafted by another team" : "Start a draft to make picks"}
+                          className="rounded-xl bg-rose-500/15 px-3 py-2 text-xs font-black text-rose-200 ring-1 ring-rose-400/20 transition hover:bg-rose-500/25 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-rose-500/15"
                         >
                           Taken
                         </button>
                       </>
-                    ) : (
-                      <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black text-white/40 blur-[1px]">
-                        Sign in required
-                      </div>
                     )}
                   </div>
 
