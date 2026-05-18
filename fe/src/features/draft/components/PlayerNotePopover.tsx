@@ -1,5 +1,5 @@
-// 선수 메모 작성 팝오버. 인라인이라고 부르지만 실제로는 fixed-position 모달 형태.
-// DraftPage 의 player row 에서 메모 아이콘 클릭 시 열림. Save 시 부모에 note 문자열을 콜백으로 전달.
+// Player note editor popover. We call it inline, but it's actually a fixed-position modal.
+// Opens when the note icon on a DraftPage player row is clicked. On Save, it passes the note string back to the parent via callback.
 import { useEffect, useRef, useState } from "react";
 
 type Props = {
@@ -24,12 +24,12 @@ export default function PlayerNotePopover({
   const [draft, setDraft] = useState(initialNote);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // open 될 때마다 입력값을 서버 값으로 재동기화 — 같은 컴포넌트가 다른 선수에 재사용되는 경우 대비
+  // Re-sync the input with the server value every time the popover opens — guards against the same component being reused for a different player.
   useEffect(() => {
     if (open) queueMicrotask(() => setDraft(initialNote));
   }, [open, initialNote]);
 
-  // 열리는 즉시 textarea 에 포커스 — 사용자가 클릭 후 바로 타이핑할 수 있게
+  // Focus the textarea the moment it opens — so the user can start typing immediately after clicking.
   useEffect(() => {
     if (open) textareaRef.current?.focus();
   }, [open]);

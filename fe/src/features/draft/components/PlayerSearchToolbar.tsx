@@ -1,6 +1,6 @@
 // Search + sort + position chips row that sits above the player list.
 // Presentation only: every value and callback flows through props from DraftPage.
-// 스탯 종류는 ComparisonPanel 과 PlayerListTable 사이의 StatPickerStrip 에서 인라인으로 선택.
+// Stat selection happens inline in the StatPickerStrip between ComparisonPanel and PlayerListTable.
 
 import FadeIn from "../../../components/ui/FadeIn";
 import Dropdown from "../../../components/ui/Dropdown";

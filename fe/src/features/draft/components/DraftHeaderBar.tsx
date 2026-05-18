@@ -26,7 +26,7 @@ type Props = {
   // Start Draft = open the setup modal (or login modal if not authed).
   // Only rendered when there is no draft in progress.
   onStartDraft: () => void;
-  // 세션 이름 변경 — 로드된 세션에서만 펜슬 버튼이 노출된다.
+  // Rename the session — the pencil button is only shown for loaded sessions.
   onRename: () => void;
 };
 

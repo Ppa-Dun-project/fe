@@ -5,21 +5,21 @@ type Props = {
   open: boolean;
   player: DraftPlayer | null;
   remainingBudget: number;
-  // 부모가 모달이 열릴 때 단건 호출로 채워 넣는 추천 bid (in-flight 동안 null + bidLoading=true).
+  // The recommended bid the parent fetches with a single call when the modal opens (null + bidLoading=true while in flight).
   recommendedBid: number | null;
   bidLoading: boolean;
   onClose: () => void;
   onConfirm: (bid: number, contractCode: ContractCode) => void;
 };
 
-// 이미지의 "구현 관점" 컬럼을 그대로. hover tooltip(title attr) 으로 노출.
-// LX/X 는 영입 시점 코드로는 의미가 없어 (자연 만료/비보호 상태) picker 에서 제외 — rollover 결과로만 등장.
+// Mirrors the "implementation view" column from the spec image. Shown via hover tooltip (title attr).
+// LX/X are excluded from the picker because they don't make sense as initial acquisition codes (natural expiration / unprotected state) — they only appear as rollover results.
 const CONTRACT_OPTIONS: { code: ContractCode; label: string; tooltip: string }[] = [
-  { code: "F3", label: "F3", tooltip: "Free Agent 계약 3년차 시작 / 3년 남음. 새로 영입한 FA 선수의 기본 장기 계약 시작값." },
-  { code: "F2", label: "F2", tooltip: "Free Agent 계약 2년 남음. 시즌이 지나면 F3 → F2." },
-  { code: "F1", label: "F1", tooltip: "Free Agent 계약 마지막 1년. 다음 오프시즌에 재계약/연장/방출 판단 필요." },
-  { code: "S1", label: "S1", tooltip: "Short / Single-year 계약. 임시 영입, 단기 계약, 드래프트 보충 선수에 사용." },
-  { code: "L2", label: "L2", tooltip: "Long-term 계약 2년 남음. 기존 선수를 연장계약한 상태." },
+  { code: "F3", label: "F3", tooltip: "Free Agent contract, year 3 begins / 3 years remaining. Default starting value for a newly-signed long-term FA." },
+  { code: "F2", label: "F2", tooltip: "Free Agent contract, 2 years remaining. F3 → F2 after one season passes." },
+  { code: "F1", label: "F1", tooltip: "Free Agent contract, final year. Re-sign / extend / release decision is required next offseason." },
+  { code: "S1", label: "S1", tooltip: "Short / single-year contract. Used for short-term signings, fill-ins, and draft replacement players." },
+  { code: "L2", label: "L2", tooltip: "Long-term contract with 2 years remaining. An existing player who was extended." },
 ];
 
 export default function AddBidModal({
@@ -37,7 +37,7 @@ export default function AddBidModal({
   }, [player]);
 
   const [bid, setBid] = useState(initialBid);
-  // 디폴트는 F3 — 신규 FA 영입의 가장 흔한 케이스. 사용자가 다른 케이스면 직접 선택.
+  // Default to F3 — the most common case for a new FA signing. Users pick manually for any other case.
   const [contractCode, setContractCode] = useState<ContractCode>("F3");
   const [minBidErrorOpen, setMinBidErrorOpen] = useState(false);
   const [budgetErrorOpen, setBudgetErrorOpen] = useState(false);

@@ -30,7 +30,7 @@ type Props = {
   pageSize: number;
   totalPages: number;
   onChangePage: (next: number) => void;
-  // 길이 5 고정. null 슬롯은 빈 셀 / 빈 헤더로 렌더해 좌우 밀림 방지.
+  // Fixed length of 5. null slots render as empty cells / empty headers to prevent horizontal shift.
   statColumnLabels: (string | null)[];
   batterCols: (string | null)[];
   pitcherCols: (string | null)[];
@@ -109,7 +109,7 @@ export default function PlayerListTable({
             !error &&
             players.map((player, idx) => {
               const status = getPlayerDraftStatus(player.id, picks, teams);
-              // 픽된 경우 그 팀의 accent 컬러 — 뱃지를 팀별 색으로 통일.
+              // If picked, use that team's accent color — badge color stays consistent per team.
               const pickedByTeamIdx =
                 status.kind !== "available"
                   ? teams.findIndex((t) => t.id === status.teamId)
@@ -197,7 +197,7 @@ export default function PlayerListTable({
                     const def = key ? getStatDef(key) : null;
                     const value = def ? def.accessor(player) : null;
                     const display = key === null ? "" : def ? def.format(value) : "—";
-                    // 짝수 컬럼 옅은 화이트, 홀수 컬럼 앰버 강조 — 시선 흐름.
+                    // Even columns get a faint white; odd columns are highlighted amber — guides the eye.
                     const cellClass =
                       colIdx % 2 === 0
                         ? "text-center text-white/70"

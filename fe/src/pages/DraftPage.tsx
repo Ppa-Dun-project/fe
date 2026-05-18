@@ -2,15 +2,15 @@
 // Displays: draft board (team rosters), player list with search/filter/sort,
 // player comparison panel, Add/Taken bid modals, and player info modal.
 //
-// Option A 데이터 흐름:
-//   1. 마운트 분기:
-//      - useParams.sessionId 있음 → GET /api/draft/sessions/{id} → React state
-//      - sessionId 없음 → sessionStorage["ppadun_unsaved_draft"] → React state
-//      - 둘 다 없으면 홈으로 리다이렉트
-//   2. 공개 GET /api/draft/players → 선수 목록 (값 없음)
-//   3. POST /api/draft/players/values, body { config, picks } → 머지용 값
-//   4. 픽 추가/삭제는 React state 만 갱신. 미저장 모드면 sessionStorage 도 sync.
-//   5. Save 버튼만이 유일한 서버 커밋 포인트 (POST 또는 PUT /api/draft/sessions[/id]).
+// Option A data flow:
+//   1. Mount branching:
+//      - useParams.sessionId present → GET /api/draft/sessions/{id} → React state
+//      - No sessionId → sessionStorage["ppadun_unsaved_draft"] → React state
+//      - Neither → redirect home
+//   2. Public GET /api/draft/players → player list (no values)
+//   3. POST /api/draft/players/values, body { config, picks } → values to merge in
+//   4. Adding/removing picks only updates React state. In unsaved mode, sessionStorage is also synced.
+//   5. The Save button is the sole server commit point (POST or PUT /api/draft/sessions[/id]).
 //
 // Filtering, sorting, and pagination all run client-side on the merged list.
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -102,8 +102,8 @@ import LoginPromptModal from "../features/auth/LoginPromptModal";
 
 const PAGE_SIZE = 30;
 
-// Notification event_type → toast prefix + variant 매핑.
-// 알 수 없는 type 은 일반 알림 fallback.
+// Maps notification event_type → toast prefix + variant.
+// Unknown types fall back to a generic notification.
 function notificationDisplay(eventType: string): {
   prefix: string;
   variant: ToastVariant;
@@ -138,22 +138,22 @@ export default function DraftPage() {
   const [searchParams] = useSearchParams();
   const draftRoomTopRef = useRef<HTMLDivElement | null>(null); // Scroll target after draft pick
 
-  // "Start Your Draft" 버튼이 띄우는 setup / 로그인 유도 모달.
+  // Setup / login-prompt modal that the "Start Your Draft" button opens.
   const [setupModalOpen, setSetupModalOpen] = useState(false);
   const [historyModalOpen, setHistoryModalOpen] = useState(false);
-  // Start Draft 직후 PPA 값 첫 응답을 기다리는 동안 페이지 전체를 블러로 덮어둔다.
-  // 이후 픽 변경에 따른 재계산은 overlay 없이 백그라운드에서 갱신.
+  // Right after Start Draft, cover the whole page with a blur while waiting for the first PPA-values response.
+  // Subsequent recomputations triggered by pick changes refresh in the background without an overlay.
   const [pendingStartDraft, setPendingStartDraft] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
 
-  // "New" → "Save first?" Yes 경로에서 Save 가 끝난 직후 setup 모달을
-  // 자동으로 열기 위한 플래그. Save 모달이 cancel 되면 클리어.
+  // Flag used by the "New" → "Save first?" Yes path to automatically open
+  // the setup modal once Save finishes. Cleared when the Save modal is cancelled.
   const [postSaveAction, setPostSaveAction] = useState<"setup" | null>(null);
 
-  // "New" 클릭 시 띄우는 3-버튼 확인 모달 — 미저장 상태에서만 사용.
+  // The three-button confirmation modal shown on "New" click — used in unsaved state only.
   const [newConfirmOpen, setNewConfirmOpen] = useState(false);
 
-  // Toast queue. id 는 monotonic counter 로 부여한다.
+  // Toast queue. Ids are assigned via a monotonic counter.
   const toastIdRef = useRef(0);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const pushToast = (
@@ -169,13 +169,13 @@ export default function DraftPage() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // 핵심 드래프트 state — 마운트 시 한 번 채워지고 이후 모든 픽 변경은 React state 만 갱신.
+  // Core draft state — populated once on mount, after which every pick change only updates React state.
   const [config, setConfig] = useState<DraftConfigServer | null>(null);
   const [hasDraftConfig, setHasDraftConfig] = useState(false);
   const [teams, setTeams] = useState<DraftTeam[]>([]);
-  // picks 는 useUndoStack 으로 관리해 undo / redo 를 지원한다.
-  //   - commitPicks: 사용자 행동에 의한 변경 (영입/제거/슬롯 이동) → 이력에 push
-  //   - resetPicks:  세션 전환 / 새 draft 시작 등 이력을 끊는 변경
+  // picks is managed by useUndoStack to support undo / redo.
+  //   - commitPicks: user-initiated changes (add/remove/slot move) → pushed onto history
+  //   - resetPicks:  changes that should break history (session switch, new draft start, etc.)
   const {
     state: picks,
     commit: commitPicks,
@@ -186,8 +186,8 @@ export default function DraftPage() {
     canRedo: canRedoPicks,
   } = useUndoStack<DraftPick[]>([]);
 
-  // 키보드 단축키 — Ctrl/Cmd+Z = undo, Ctrl+Y / Ctrl·Cmd+Shift+Z = redo.
-  // input / textarea / contenteditable 안에서는 무시 (브라우저 기본 undo 유지).
+  // Keyboard shortcuts — Ctrl/Cmd+Z = undo, Ctrl+Y / Ctrl·Cmd+Shift+Z = redo.
+  // Ignored inside input / textarea / contenteditable (preserves the browser's native undo).
   useUndoKeyboardShortcuts({
     onUndo: undoPicks,
     onRedo: redoPicks,
@@ -197,9 +197,9 @@ export default function DraftPage() {
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
 
-  // 공개 API 에서 받아온 기본 목록 (값 없음)
+  // Base list fetched from the public API (no values attached)
   const [publicPlayers, setPublicPlayers] = useState<DraftPlayerPublic[]>([]);
-  // 인증 API 에서 받아온 값 테이블 — 비로그인 또는 조회 실패 시 null
+  // Values table fetched from the authenticated API — null when logged out or fetch fails
   const [playerValues, setPlayerValues] = useState<DraftPlayerValue[] | null>(null);
 
   const [query, setQuery] = useState(() => searchParams.get("query")?.trim() ?? "");
@@ -207,15 +207,15 @@ export default function DraftPage() {
   const [sort, setSort] = useState<DraftSort>("score_desc");
   const [page, setPage] = useState(1);
 
-  // 필터/정렬 옵션은 더 이상 서버가 내려주지 않음 — 상수 그대로 사용
+  // Filter/sort options are no longer returned by the server — use the constants directly
   const positionFilters = DEFAULT_POSITION_FILTERS;
   const showingPitcherColumns = isPitcherPositionFilter(position);
   const sortOptions = showingPitcherColumns ? PITCHER_SORT_OPTIONS : BATTER_SORT_OPTIONS;
 
-  // 사용자가 선택한 5개 스탯 (타자/투수 별도) — localStorage에 영구 저장.
+  // The user-selected 5 stat columns (separately for batters/pitchers) — persisted in localStorage.
   const { batterCols, pitcherCols, setBatterCols, setPitcherCols, resetToDefaults: resetStatColumns } = useStatColumns();
   const activeStatKeys = showingPitcherColumns ? pitcherCols : batterCols;
-  // 슬롯이 null 이면 헤더 라벨도 빈 문자열 — 좌우 컬럼이 안 밀리도록.
+  // If a slot is null, the header label is an empty string too — so neighboring columns don't shift.
   const statColumnLabels = activeStatKeys.map((k) => (k ? getStatDef(k)?.label ?? k : ""));
 
   const [loading, setLoading] = useState(false);
@@ -228,27 +228,27 @@ export default function DraftPage() {
   const [profilePlayerId, setProfilePlayerId] = useState<number | null>(null);
   const [profilePlayerType, setProfilePlayerType] = useState<"batter" | "pitcher">("batter");
 
-  // 선수 메모 저장 중 indicator — 모달의 Save 버튼 disabled / 로딩 표시용.
+  // Indicator while a player note is being saved — used to disable / show loading on the modal's Save button.
   const [noteSaving, setNoteSaving] = useState(false);
 
-  // 현재 보고 있는 보드 — 메인/마이너/택시. DraftRoomBoard 의 포스트잇 탭으로 전환.
-  // Add/Taken 액션은 이 view 의 kind 로 픽을 생성한다.
+  // The board currently being viewed — main/minors/taxi. Switched via the post-it tabs on DraftRoomBoard.
+  // Add/Taken actions create picks with this view's kind.
   const [boardView, setBoardView] = useState<DraftPickKind>("main");
 
   const [addTarget, setAddTarget] = useState<DraftPlayer | null>(null);
-  // Add 모달이 열릴 때 즉석에서 단건 호출하는 추천 bid + 그 in-flight 상태.
+  // Recommended bid that's fetched on-the-fly when the Add modal opens, plus its in-flight state.
   const [addTargetBid, setAddTargetBid] = useState<number | null>(null);
   const [addTargetBidLoading, setAddTargetBidLoading] = useState(false);
   const [takenTarget, setTakenTarget] = useState<DraftPlayer | null>(null);
 
-  // 메모 — playerId → note. 로드 모드에서만 fetch/저장 동작 (세션 ID 필요).
+  // Notes — playerId → note. Fetch/save only happens in loaded mode (requires a session ID).
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [noteTarget, setNoteTarget] = useState<DraftPlayer | null>(null);
-  // 15초마다 백엔드 알림 폴링. 한 cycle 의 새 이벤트마다 토스트 (각 10초간 표시).
-  // - 10개 이하: 즉시 좌르륵 모두 띄움
-  // - 11개 이상: 2초 간격으로 stagger 해서 차례차례 띄움. 한꺼번에 화면 덮는 거 방지.
-  //   setTimeout cleanup 은 의도적으로 안 함 — DraftPage unmount 시 pushToast 가
-  //   stale closure 가 되지만 React 가 unmounted setState 를 무시하므로 안전.
+  // Polls the backend for notifications every 15 seconds. One toast per new event in a cycle (each shown for 10 seconds).
+  // - 10 or fewer: fire them all at once
+  // - 11 or more: stagger at 2-second intervals so they don't bury the screen all at once.
+  //   Deliberately no setTimeout cleanup — on DraftPage unmount pushToast becomes a stale
+  //   closure, but React ignores setState on unmounted components, so it's safe.
   useNotificationPolling((evs: NotificationEvent[]) => {
     if (evs.length === 0) return;
 
@@ -270,13 +270,13 @@ export default function DraftPage() {
     });
   }, authed);
 
-  // Save / Import 모달
+  // Save / Import modals
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveNameInput, setSaveNameInput] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // Rename 모달 — 로드된 세션의 이름 변경 전용.
+  // Rename modal — only for renaming a loaded session.
   const [renameModalOpen, setRenameModalOpen] = useState(false);
   const [renameInput, setRenameInput] = useState("");
   const [renameError, setRenameError] = useState<string | null>(null);
@@ -287,7 +287,7 @@ export default function DraftPage() {
     () => clampRosterSize(config?.rosterPlayers),
     [config?.rosterPlayers]
   );
-  // 옛 세션엔 rosterSlots 가 없을 수 있으므로 기본값 fallback.
+  // Legacy sessions may lack rosterSlots, so fall back to the default.
   const rosterSlotCounts = useMemo(
     () => config?.rosterSlots ?? DEFAULT_ROSTER_SLOTS,
     [config?.rosterSlots]
@@ -297,7 +297,7 @@ export default function DraftPage() {
     [rosterSlotCounts]
   );
 
-  // 공개 선수 목록 + 인증 값 목록을 playerId 로 머지한 최종 UI 목록
+  // Final UI list — merges the public player list with the authenticated value list by playerId
   const allPlayers = useMemo<DraftPlayer[]>(
     () => mergePlayersWithValues(publicPlayers, playerValues),
     [publicPlayers, playerValues]
@@ -382,12 +382,12 @@ export default function DraftPage() {
     return calculateCurrentRound(teams.length, rosterSize, picks);
   }, [teams.length, rosterSize, picks]);
 
-  // 포지션 필터를 바꾸면 paginated `players` 에서 사라질 수 있으므로 전체 lookup 사용.
+  // Changing the position filter can drop the player from the paginated `players`, so we look up against the full list.
   const selectedA = compareAId ? playersById[compareAId] ?? null : null;
   const selectedB = compareBId ? playersById[compareBId] ?? null : null;
 
-  // Compare 슬롯/모달/AI 모두 recommendedBid 를 필요로 함 — 선택되는 즉시 단건 호출로 미리 채움.
-  // 같은 선수가 재선택되면 다시 안 부르고, A/B 가 비면 즉시 null 로 reset.
+  // The compare slots / modal / AI all need recommendedBid — prefetch it with a single-player call as soon as a player is selected.
+  // The call is not repeated if the same player is re-selected; A/B clearing resets it to null immediately.
   const [compareBidA, setCompareBidA] = useState<number | null>(null);
   const [compareBidB, setCompareBidB] = useState<number | null>(null);
 
@@ -409,7 +409,7 @@ export default function DraftPage() {
     setTakenTarget(null);
   };
 
-  // 메모 팝오버 — 로드된 세션에서만 사용 가능 (미저장 모드는 버튼 자체가 비활성화됨).
+  // Notes popover — only usable in a loaded session (in unsaved mode the button itself is disabled).
   const openNoteModal = (player: DraftPlayer) => {
     setNoteTarget(player);
   };
@@ -432,14 +432,14 @@ export default function DraftPage() {
         return next;
       });
 
-    // 미저장 모드 — sessionStorage 동기화 effect 가 알아서 잡아가므로 여기서 state만 갱신.
+    // Unsaved mode — the sessionStorage-sync effect picks it up automatically, so just update state here.
     if (sessionId === null) {
       applyLocal();
       setNoteTarget(null);
       return;
     }
 
-    // 저장된 세션 — 즉시 서버에 PUT.
+    // Saved session — PUT to the server immediately.
     setNoteSaving(true);
     apiPutAuth<{ status: string }, { note: string }>(
       `/api/draft/sessions/${sessionId}/notes/${encodeURIComponent(playerId)}`,
@@ -456,8 +456,8 @@ export default function DraftPage() {
       .finally(() => setNoteSaving(false));
   };
 
-  // Start Your Draft 모달에서 입력한 config 로 page state 를 갱신.
-  // sessionStorage 도 함께 저장해 같은 탭에서 이동/새로고침해도 resume 되도록 한다.
+  // Updates page state from the config entered in the Start Your Draft modal.
+  // Also writes to sessionStorage so the draft resumes after navigation/refresh in the same tab.
   const handleSetupSubmit = (next: DraftSetupConfig) => {
     const config: DraftConfigServer = {
       leagueType: next.leagueType,
@@ -475,7 +475,7 @@ export default function DraftPage() {
         JSON.stringify({ config, picks: [], notes: {} } satisfies UnsavedDraft)
       );
     } catch {
-      // 쿼터 초과 등은 조용히 무시.
+      // Silently ignore quota-exceeded and similar errors.
     }
     setConfig(config);
     setTeams(buildTeamsFromConfig(config));
@@ -483,11 +483,11 @@ export default function DraftPage() {
     setNotes({});
     setHasDraftConfig(true);
     setSetupModalOpen(false);
-    // 다음 useEffect 가 새 config 로 PPA 값을 다시 fetch 한다 — overlay 가 그 동안 노출됨.
+    // The next useEffect refetches PPA values with the new config — the overlay stays up until that completes.
     setPendingStartDraft(true);
   };
 
-  // 비로그인이면 로그인 모달, 로그인 상태면 setup 모달.
+  // Logged out → login modal; logged in → setup modal.
   const openStartDraft = () => {
     if (authed) {
       setSetupModalOpen(true);
@@ -496,13 +496,13 @@ export default function DraftPage() {
     }
   };
 
-  // 모든 로컬 상태 / sessionStorage 를 초기화해 "갓 들어온" 상태로 만든 다음
-  // setup 모달을 띄움. 로드 모드였다면 URL 도 /draft 로 바꿔서 사이드 효과 차단.
+  // Reset all local state / sessionStorage back to a "fresh entry" state, then
+  // open the setup modal. If we were in loaded mode, also change the URL to /draft to block side effects.
   const resetToFreshSetup = () => {
     try {
       removeUnsavedDraftStorage();
     } catch {
-      // 무시
+      // ignore
     }
     if (isLoadedMode) {
       navigate("/draft", { replace: true });
@@ -516,10 +516,10 @@ export default function DraftPage() {
     setSetupModalOpen(true);
   };
 
-  // New 버튼 — 현재 드래프트를 정리하고 새로 시작하는 setup 모달을 띄움.
-  //   - 로드된 세션 (isLoadedMode): 이미 DB 에 저장돼 있으니 즉시 setup.
-  //   - 미저장 드래프트: 3-버튼 확인 모달 (Save first / Discard current / Cancel)
-  //     로 분기. Cancel 은 진짜 abort — 드래프트 상태 변경 없음.
+  // New button — clean up the current draft and open the setup modal to start fresh.
+  //   - Loaded session (isLoadedMode): already persisted in the DB, so jump straight into setup.
+  //   - Unsaved draft: branch into a three-button confirm modal (Save first / Discard current / Cancel).
+  //     Cancel is a true abort — no draft state changes.
   const handleNewDraft = () => {
     if (isLoadedMode) {
       resetToFreshSetup();
@@ -540,12 +540,12 @@ export default function DraftPage() {
   };
 
   const handleNewConfirmCancel = () => {
-    // 진짜 cancel — 아무 상태도 변경하지 않음.
+    // True cancel — leave all state untouched.
     setNewConfirmOpen(false);
   };
 
-  // 진행 중인 미저장 draft 폐기 — sessionStorage 비우고 player browser 상태로 복귀.
-  // 저장된 세션(isLoadedMode)은 이 버튼 자체가 노출되지 않으므로 분기 필요 없음.
+  // Discard the in-progress unsaved draft — clears sessionStorage and returns to the player-browser state.
+  // For saved sessions (isLoadedMode) this button isn't shown, so no branching needed.
   const handleDiscardDraft = () => {
     if (!window.confirm("Discard the current draft? This cannot be undone.")) return;
 
@@ -578,9 +578,9 @@ export default function DraftPage() {
     setHasDraftConfig(false);
   };
 
-  // 세션 부트스트랩 + 메모 패치 — 두 useEffect 를 캡슐화한 훅에 위임.
-  // 동작은 100% 동일: 로드 모드는 GET session detail + notes, 미저장 모드는
-  // sessionStorage 에서 resume 또는 DEFAULT_DRAFT_CONFIG 폴백.
+  // Session bootstrap + notes fetch — delegated to a hook that encapsulates both useEffects.
+  // The behavior is identical: loaded mode does GET session detail + notes; unsaved mode
+  // resumes from sessionStorage or falls back to DEFAULT_DRAFT_CONFIG.
   useDraftSessionLoader({
     isLoadedMode,
     sessionId,
@@ -593,9 +593,9 @@ export default function DraftPage() {
     resetPicks,
   });
 
-  // My Team 페이지가 "현재 활성 드래프트 세션" 을 알도록 sessionStorage 에 mirror.
-  // 로드 모드 → 그 sessionId, 미저장(또는 fresh) → null.
-  // → My Team 페이지가 옛 URL ?sessionId 로 잘못된 세션을 보여주는 문제 차단.
+  // Mirror the "currently active draft session" into sessionStorage so the My Team page can see it.
+  // Loaded mode → that sessionId; unsaved (or fresh) → null.
+  // → Prevents My Team from showing the wrong session because of a stale URL ?sessionId.
   useEffect(() => {
     if (isLoadedMode && sessionId !== null) {
       setActiveDraftSessionId(sessionId);
@@ -604,7 +604,7 @@ export default function DraftPage() {
     }
   }, [isLoadedMode, sessionId]);
 
-  // 미저장 모드에서 picks/notes 가 바뀔 때마다 sessionStorage 에도 sync — 페이지 이동/새로고침 보호.
+  // In unsaved mode, sync picks/notes to sessionStorage whenever they change — protects against navigation/refresh.
   useEffect(() => {
     if (isLoadedMode || !bootstrapped || !config || !hasDraftConfig) return;
     try {
@@ -613,12 +613,12 @@ export default function DraftPage() {
         JSON.stringify({ config, picks, notes } satisfies UnsavedDraft)
       );
     } catch {
-      // 쿼터 초과 등은 조용히 무시 — 새로고침 보호 실패해도 화면 동작에는 영향 없음.
+      // Silently ignore quota-exceeded and similar errors — losing refresh protection doesn't affect on-screen behavior.
     }
   }, [isLoadedMode, bootstrapped, config, hasDraftConfig, picks, notes]);
 
-  // 공개 선수 목록 — leagueType 이 바뀌면 다시 불러온다.
-  // AL/NL 은 ?league= 쿼리로 백엔드 필터링, 그 외(custom 등)는 전체.
+  // Public player list — refetched when leagueType changes.
+  // AL/NL filter on the backend via ?league=, everything else (custom, etc.) returns the full list.
   const leagueQuery =
     config?.leagueType === "AL" || config?.leagueType === "NL"
       ? config.leagueType
@@ -654,9 +654,9 @@ export default function DraftPage() {
     return () => controller.abort();
   }, [leagueQuery]);
 
-  // 인증된 사용자에게만 PPA 값을 불러와 playerId 로 공개 목록과 머지한다.
-  // recommendedBid 는 Add 모달이 열릴 때 단건으로 따로 호출 (POST /api/draft/players/bid).
-  // 로그아웃 시 값을 즉시 지워서 UI 에 남지 않도록 함.
+  // Fetch PPA values only for authenticated users and merge them into the public list by playerId.
+  // recommendedBid is fetched per-player when the Add modal opens (POST /api/draft/players/bid).
+  // On logout, values are cleared immediately so they don't linger in the UI.
   useEffect(() => {
     if (!authed || !config) {
       queueMicrotask(() => setPlayerValues(null));
@@ -686,9 +686,9 @@ export default function DraftPage() {
     return () => controller.abort();
   }, [authed, config]);
 
-  // Compare A 가 바뀔 때마다 단건 bid 호출 — Compare 슬롯/모달/AI 가 같이 사용한다.
-  // 선택이 바뀌는 순간 옛 bid 가 새 선수에게 잘못 적용되지 않도록 microtask 로 reset.
-  // picks 는 fetch payload 에만 들어가고 deps 에는 빠짐 — 픽 마다 재호출하면 비싸기 때문.
+  // Each time Compare A changes, fire a single-player bid call — shared by the Compare slots / modal / AI.
+  // Reset in a microtask the instant the selection changes so the old bid isn't mistakenly applied to the new player.
+  // picks is included in the fetch payload but omitted from deps — refetching on every pick would be expensive.
   useEffect(() => {
     if (!authed || !config || !compareAId) {
       queueMicrotask(() => setCompareBidA(null));
@@ -741,7 +741,7 @@ export default function DraftPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authed, config, compareBId]);
 
-  // bid 가 채워진 선수 객체 — ComparisonPanel / PlayerComparisonModal / AI 추천 모두 동일한 객체 사용.
+  // Player object with the bid filled in — ComparisonPanel / PlayerComparisonModal / AI recommendation all share this object.
   const selectedAWithBid = useMemo(
     () => (selectedA ? { ...selectedA, recommendedBid: compareBidA } : null),
     [selectedA, compareBidA],
@@ -752,7 +752,7 @@ export default function DraftPage() {
   );
 
   // Toggle player selection for A/B comparison (max 2 players).
-  // 타자/투수 혼합 비교는 차단하고 토스트로 안내한다.
+  // Block mixed batter/pitcher comparisons and surface a toast.
   const handleCompareToggle = (playerId: string) => {
     if (!authed) return;
     if (comparisonOpen) setComparisonOpen(false);
@@ -774,7 +774,7 @@ export default function DraftPage() {
       ? selectedB
       : !compareBId
         ? selectedA
-        : selectedA; // 둘 다 차 있으면 B 를 교체 → A 와 비교 가능해야 함
+        : selectedA; // If both slots are filled, B gets replaced → it must be comparable with A
 
     if (counterpart && !arePlayersComparable(candidate, counterpart)) {
       pushToast("Batters and pitchers cannot be compared together.", "error");
@@ -824,14 +824,14 @@ export default function DraftPage() {
     setProfilePlayerId(null);
   };
 
-  // 픽 제거 — 서버 호출 없이 React state 만 갱신. 미저장 모드면 localStorage sync 는 별도 effect 에서.
+  // Remove a pick — no server call, only React state updates. localStorage sync in unsaved mode is handled in a separate effect.
   const handleRemovePick = (pick: DraftPick) => {
     commitPicks((prev) => prev.filter((p) => p.playerId !== pick.playerId));
   };
 
-  // 드래그-드롭으로 슬롯/팀을 옮길 때:
-  //  - 같은 팀: 메인은 자격 검사 후 이동/스왑, 마이너·택시는 순수 재정렬.
-  //  - 다른 팀: 빈 슬롯 + 자격(메인) 일 때만 이동. occupied 면 스왑 대신 토스트로 안내.
+  // When drag-and-drop moves a slot/team:
+  //  - Same team: main requires eligibility check before moving/swapping; minors/taxi are pure reordering.
+  //  - Different team: only allowed on an empty slot + eligibility (main). If occupied, show a toast instead of swapping.
   const handleSlotReassign = (
     fromTeamId: string,
     fromIndex: number,
@@ -853,7 +853,7 @@ export default function DraftPage() {
     const toPick = toTeamPicks.find((p) => p.slotIndex === toIndex);
     const isCrossTeam = fromTeamId !== toTeamId;
 
-    // 팀 간 이동: occupied 면 스왑 안 함, 토스트로 안내.
+    // Cross-team move: don't swap if occupied — show a toast instead.
     if (isCrossTeam && toPick) {
       const targetTeam = teams.find((t) => t.id === toTeamId);
       pushToast(
@@ -863,7 +863,7 @@ export default function DraftPage() {
       return;
     }
 
-    // 마이너/택시: 자격 검사 없이 처리.
+    // Minors/taxi: handle without an eligibility check.
     if (kind !== "main") {
       commitPicks((prev) =>
         prev.map((p) => {
@@ -892,7 +892,7 @@ export default function DraftPage() {
       return;
     }
 
-    // 팀 간 이동 (빈 슬롯 확인은 위에서 끝남): teamId + slotIndex + slotPos 교체.
+    // Cross-team move (empty-slot check already done above): swap teamId + slotIndex + slotPos.
     if (isCrossTeam) {
       commitPicks((prev) =>
         prev.map((p) =>
@@ -909,7 +909,7 @@ export default function DraftPage() {
       return;
     }
 
-    // 같은 팀 — 빈 target → 단순 이동.
+    // Same team — empty target → simple move.
     if (!toPick) {
       commitPicks((prev) =>
         prev.map((p) =>
@@ -921,7 +921,7 @@ export default function DraftPage() {
       return;
     }
 
-    // 같은 팀 — occupied target → 양방향 자격 모두 OK 일 때만 스왑.
+    // Same team — occupied target → swap only when both directions are eligible.
     const toPlayer = playersById[toPick.playerId];
     if (!toPlayer) return;
     if (!isEligibleForSlot(toPlayer.positions, fromSlotPos)) {
@@ -944,10 +944,10 @@ export default function DraftPage() {
     );
   };
 
-  // 픽 추가 시 클라이언트가 즉시 slotIndex 결정.
-  // 같은 playerId 의 기존 픽은 제외 → 같은 팀+kind occupied 슬롯 집합 → 빈 슬롯 찾기.
-  // 메인은 포지션 자격 매칭, 마이너/택시는 그냥 첫 빈 자리.
-  // -1 이면 자리 없음 알림 후 종료.
+  // When adding a pick, the client decides slotIndex immediately.
+  // Drop any existing pick with the same playerId → build the set of occupied slots for the same team+kind → find an empty slot.
+  // Main uses positional eligibility; minors/taxi just take the first empty slot.
+  // -1 means no spot is available — notify and bail.
   const addPickToState = (
     playerId: string,
     draftedByTeamId: string,
@@ -964,8 +964,8 @@ export default function DraftPage() {
     );
     const player = playersById[playerId];
 
-    // signedSeason 은 현재 세션의 targetSeason 을 그대로 박는다 (rollover 의 기준점).
-    // contractCode 가 없으면 signedSeason 도 의미 없어 함께 null.
+    // signedSeason is pinned to the current session's targetSeason (the anchor for rollover).
+    // Without a contractCode, signedSeason is meaningless, so null it out too.
     const signedSeason = contractCode ? config?.targetSeason ?? null : null;
 
     if (kind !== "main") {
@@ -1021,7 +1021,7 @@ export default function DraftPage() {
     return true;
   };
 
-  // Add 버튼 클릭 — 메인이면 bid 모달 (열면서 단건 bid fetch), 마이너/택시는 바로 추가.
+  // Add button click — main opens the bid modal (and fetches a single-player bid on open); minors/taxi add directly.
   const handleAddClick = (player: DraftPlayer) => {
     if (boardView !== "main") {
       if (!myTeam) return;
@@ -1060,15 +1060,15 @@ export default function DraftPage() {
     draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // ── Save 버튼 핸들러 ──
+  // ── Save button handler ──
   const openSaveModal = () => {
     setSaveNameInput(initialNameFor(sessionName));
     setSaveError(null);
     setSaveModalOpen(true);
   };
 
-  // Save 버튼 — 로드된 세션이면 이름 입력 없이 곧바로 PUT, 성공 시 토스트.
-  // 미저장(신규) 모드는 기존 흐름 그대로 SaveSessionModal 을 띄움.
+  // Save button — for a loaded session, skip the name prompt and PUT immediately; toast on success.
+  // Unsaved (new) mode keeps the existing flow and opens SaveSessionModal.
   const handleSaveClick = () => {
     if (!isLoadedMode || sessionId === null || !config || !sessionName) {
       openSaveModal();
@@ -1093,7 +1093,7 @@ export default function DraftPage() {
       .finally(() => setSaving(false));
   };
 
-  // 펜슬 아이콘 → rename 모달.
+  // Pencil icon → rename modal.
   const openRenameModal = () => {
     setRenameInput(sessionName ?? "");
     setRenameError(null);
@@ -1114,7 +1114,7 @@ export default function DraftPage() {
       return;
     }
     if (next === sessionName) {
-      // 변경 없음 — 그냥 닫기.
+      // No change — just close.
       setRenameModalOpen(false);
       return;
     }
@@ -1136,9 +1136,9 @@ export default function DraftPage() {
       .finally(() => setRenameSaving(false));
   };
 
-  // 로드된 세션에서 픽이 바뀌면 500ms 디바운스 후 백그라운드 PUT.
-  // 목적: MyTeam 페이지가 DB 를 조회할 때 최신 픽이 반영되도록 (실시간 동기화).
-  // 첫 마운트 / 세션 전환 직후 bootstrap 이 picks 를 세팅하는 시점은 skip.
+  // In a loaded session, picks changes trigger a 500ms-debounced background PUT.
+  // Purpose: ensure MyTeam sees the latest picks when it queries the DB (real-time sync).
+  // Skip the moment when bootstrap is setting picks on first mount / right after a session switch.
   const autoSaveTimerRef = useRef<number | null>(null);
   const skipFirstAutoSaveRef = useRef(true);
 
@@ -1175,7 +1175,7 @@ export default function DraftPage() {
   const closeSaveModal = () => {
     setSaveModalOpen(false);
     setSaveError(null);
-    // 사용자가 Save 를 취소하면 chained post-save action 도 함께 폐기.
+    // If the user cancels Save, also discard any chained post-save action.
     setPostSaveAction(null);
   };
 
@@ -1197,12 +1197,12 @@ export default function DraftPage() {
       )
         .then((data) => {
           setSessionName(data.name);
-          // closeSaveModal 은 postSaveAction 도 클리어하므로, chain 동작이
-          // 예약돼 있었다면 그 사실을 먼저 캡처한 뒤 닫는다.
+          // closeSaveModal also clears postSaveAction, so capture any scheduled
+          // chained action first, then close.
           const chained = postSaveAction;
           closeSaveModal();
           if (chained === "setup") {
-            // 저장된 세션을 그대로 두고 새 setup 으로 이동.
+            // Leave the saved session intact and move on to a fresh setup.
             resetToFreshSetup();
           }
         })
@@ -1219,8 +1219,8 @@ export default function DraftPage() {
       { name, config, picks }
     )
       .then(async (data) => {
-        // 미저장 동안 쌓인 로컬 메모를 새 session_id 로 일괄 PUT.
-        // 개별 실패는 무시 — 메모는 부수 데이터이고, 세션 자체는 이미 성공했음.
+        // Bulk-PUT any local notes accumulated during unsaved mode against the new session_id.
+        // Individual failures are ignored — notes are auxiliary data and the session itself already saved successfully.
         const noteEntries = Object.entries(notes);
         if (noteEntries.length > 0) {
           await Promise.all(
@@ -1238,15 +1238,15 @@ export default function DraftPage() {
         try {
           removeUnsavedDraftStorage();
         } catch {
-          // 무시
+          // ignore
         }
         setSaving(false);
         setSaveModalOpen(false);
 
         if (postSaveAction === "setup") {
-          // "New" 흐름에서 Yes-save 를 거친 경우 — 새로 만든 세션 URL 로
-          // 이동하지 않고, 곧바로 새 setup 모달을 띄운다. (세션은 DB 에
-          // 저장돼 있으므로 추후 Import 에서 다시 열 수 있다.)
+          // We came through the "New" → Yes-save flow — don't navigate to the newly
+          // created session's URL; open a fresh setup modal directly. (The session
+          // is already persisted in the DB and can be reopened later via Import.)
           setPostSaveAction(null);
           resetToFreshSetup();
         } else {
@@ -1264,10 +1264,10 @@ export default function DraftPage() {
       });
   };
 
-  // ── Import 모달 핸들러 ──
+  // ── Import modal handlers ──
   const [sessionList, setSessionList] = useState<SessionSummary[]>([]);
   const [sessionListLoading, setSessionListLoading] = useState(false);
-  // Copy 흐름: Copy 버튼 클릭 시 rename 모달을 띄우고, Confirm 시 실제 POST.
+  // Copy flow: clicking the Copy button opens a rename modal; Confirm actually issues the POST.
   const [copyTarget, setCopyTarget] = useState<{ id: number } | null>(null);
   const [copyNameInput, setCopyNameInput] = useState("");
   const [copyError, setCopyError] = useState<string | null>(null);
@@ -1298,7 +1298,7 @@ export default function DraftPage() {
     navigate(`/draft/${id}`);
   };
 
-  // Copy 버튼 클릭: rename 모달을 띄운다. 실제 POST 는 handleCopyConfirm.
+  // Copy button click: open the rename modal. The actual POST happens in handleCopyConfirm.
   const handleSessionCopy = (id: number) => {
     const source = sessionList.find((s) => s.id === id);
     setCopyTarget({ id });
@@ -1313,7 +1313,7 @@ export default function DraftPage() {
     setCopyError(null);
   };
 
-  // Confirm: 원본 세션 + 메모 로드 → 사용자가 입력한 이름으로 새 세션 POST.
+  // Confirm: load the source session + notes → POST a new session under the user-entered name.
   const handleCopyConfirm = () => {
     if (copyTarget === null) return;
     const name = copyNameInput.trim();
@@ -1375,7 +1375,7 @@ export default function DraftPage() {
     if (!confirm("Delete this session?")) return;
     apiDeleteAuth<{ status: string; sessionId: number }>(`/api/draft/sessions/${id}`)
       .then(() => {
-        // 현재 활성 세션 삭제 시 홈으로 리다이렉트
+        // If the currently active session is deleted, redirect home
         if (isLoadedMode && sessionId === id) {
           closeImportModal();
           navigate("/", { replace: true });
