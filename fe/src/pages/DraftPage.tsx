@@ -244,26 +244,30 @@ export default function DraftPage() {
   // 메모 — playerId → note. 로드 모드에서만 fetch/저장 동작 (세션 ID 필요).
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [noteTarget, setNoteTarget] = useState<DraftPlayer | null>(null);
-  // 15초마다 백엔드 알림 폴링. 한 cycle에서 새 이벤트가 여러 개 들어오면
-  // toast 폭격을 피하려고 한 개로 합쳐서 보여준다 (가장 최근 이벤트 메시지 + 카운트).
+  // 15초마다 백엔드 알림 폴링. 한 cycle 의 새 이벤트마다 토스트 (각 10초간 표시).
+  // - 10개 이하: 즉시 좌르륵 모두 띄움
+  // - 11개 이상: 2초 간격으로 stagger 해서 차례차례 띄움. 한꺼번에 화면 덮는 거 방지.
+  //   setTimeout cleanup 은 의도적으로 안 함 — DraftPage unmount 시 pushToast 가
+  //   stale closure 가 되지만 React 가 unmounted setState 를 무시하므로 안전.
   useNotificationPolling((evs: NotificationEvent[]) => {
     if (evs.length === 0) return;
 
-    if (evs.length === 1) {
-      const ev = evs[0];
+    const STAGGER_THRESHOLD = 10;
+    const STAGGER_MS = 2000;
+
+    const showOne = (ev: NotificationEvent) => {
       const { prefix, variant } = notificationDisplay(ev.event_type);
       pushToast(`${prefix} — ${ev.message}`, variant);
+    };
+
+    if (evs.length <= STAGGER_THRESHOLD) {
+      for (const ev of evs) showOne(ev);
       return;
     }
 
-    // 여러 개 — 가장 최근 (id가 가장 큰) 이벤트를 대표로 표시하고 나머지는 카운트로.
-    const sorted = [...evs].sort((a, b) => b.id - a.id);
-    const latest = sorted[0];
-    const { prefix, variant } = notificationDisplay(latest.event_type);
-    pushToast(
-      `${prefix} — ${latest.message} (+${evs.length - 1} more)`,
-      variant
-    );
+    evs.forEach((ev, i) => {
+      window.setTimeout(() => showOne(ev), i * STAGGER_MS);
+    });
   }, authed);
 
   // Save / Import 모달
