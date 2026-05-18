@@ -85,6 +85,16 @@ export function isPitcherPositionFilter(filter: DraftPositionFilter): boolean {
   return filter === "SP" || filter === "RP";
 }
 
+// Compare 기능 — 같은 분류끼리만 비교 허용한다.
+// 타자/포수/유틸은 모두 playerType !== "pitcher" 이므로 한 그룹.
+// SP/RP 는 playerType === "pitcher" 그룹.
+export function arePlayersComparable(
+  a: DraftPlayerPublic,
+  b: DraftPlayerPublic,
+): boolean {
+  return isPitcherOnly(a) === isPitcherOnly(b);
+}
+
 // ── Formatters ────────────────────────────────────────────────────────
 
 export function formatNumber(value: number | null | undefined, digits: number) {
