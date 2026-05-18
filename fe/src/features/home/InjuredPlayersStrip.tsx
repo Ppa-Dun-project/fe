@@ -26,8 +26,8 @@ export default function InjuredPlayersStrip() {
 
   return (
     // News 섹션과 동일한 outer container 스타일로 sibling 느낌.
-    // h-full + flex column → HomePage 의 items-stretch grid 와 함께 두 섹션 높이를 맞춤.
-    <section className="flex h-full flex-col rounded-3xl border border-white/10 bg-white/5 p-6">
+    // 사이즈는 자기 자신의 자연 높이로 두고, 카드가 많아지면 안에서 스크롤.
+    <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
       <div className="flex items-end justify-between gap-3">
         <div>
           <h2 className="text-lg font-bold text-white">Injured Players</h2>
@@ -38,9 +38,9 @@ export default function InjuredPlayersStrip() {
         <span className="text-xs font-bold text-white/40">{players.length} listed</span>
       </div>
 
-      {/* 카드 리스트 — flex-1 로 남은 공간 전부 채움, 넘치면 세로 스크롤.
+      {/* 카드 리스트 — max-h로 약 3카드 분량 높이만 유지, 그 이상은 세로 스크롤.
           ppadun-dropdown-scroll 클래스로 다른 스크롤 영역과 동일한 얇은 스크롤바 스타일 사용. */}
-      <div className="ppadun-dropdown-scroll mt-5 flex-1 space-y-3 overflow-y-auto pr-1">
+      <div className="ppadun-dropdown-scroll mt-5 max-h-96 space-y-3 overflow-y-auto pr-1">
         {players.map((p) => (
           <InjuredPlayerCard key={p.player_id} item={p} />
         ))}
