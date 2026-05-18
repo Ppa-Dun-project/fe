@@ -23,6 +23,8 @@ type Props = {
     toIndex: number,
     kind: DraftPickKind,
   ) => void;
+  // Ordered Draft History 모달을 여는 콜백. 메인 보드에서만 노출.
+  onOpenHistory?: () => void;
 };
 
 // Drag payload: { teamId, slotIndex } JSON. teamId 가 일치할 때만 drop 을 허용.
@@ -54,6 +56,7 @@ export default function DraftRoomBoard({
   onViewChange,
   onRemovePick,
   onSlotReassign,
+  onOpenHistory,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
@@ -172,8 +175,20 @@ export default function DraftRoomBoard({
         </div>
 
         {isMainView && (
-          <div className="text-sm font-black text-emerald-400">
-            Round {currentRound} / {totalRounds}
+          <div className="flex items-center gap-3">
+            {onOpenHistory && (
+              <button
+                type="button"
+                onClick={onOpenHistory}
+                className="rounded-xl border border-white/15 bg-black/25 px-3 py-1.5 text-xs font-black text-white/80 transition hover:bg-white/10"
+                title="View ordered draft history"
+              >
+                History
+              </button>
+            )}
+            <div className="text-sm font-black text-emerald-400">
+              Round {currentRound} / {totalRounds}
+            </div>
           </div>
         )}
       </div>

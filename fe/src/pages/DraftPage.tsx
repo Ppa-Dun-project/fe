@@ -82,6 +82,7 @@ import CopySessionModal from "../features/draft/components/CopySessionModal";
 import PlayerListTable from "../features/draft/components/PlayerListTable";
 import DraftHeaderBar from "../features/draft/components/DraftHeaderBar";
 import PlayerSearchToolbar from "../features/draft/components/PlayerSearchToolbar";
+import OrderedDraftHistoryModal from "../features/draft/components/OrderedDraftHistoryModal";
 import ComparisonPanel from "../features/draft/components/ComparisonPanel";
 import { useStatColumns } from "../features/draft/useStatColumns";
 import { getStatDef } from "../features/draft/statColumns";
@@ -118,6 +119,10 @@ export default function DraftPage() {
 
   // "Start Your Draft" 버튼이 띄우는 setup / 로그인 유도 모달.
   const [setupModalOpen, setSetupModalOpen] = useState(false);
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  // Start Draft 직후 PPA 값 첫 응답을 기다리는 동안 페이지 전체를 블러로 덮어둔다.
+  // 이후 픽 변경에 따른 재계산은 overlay 없이 백그라운드에서 갱신.
+  const [pendingStartDraft, setPendingStartDraft] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
 
   // "New" → "Save first?" Yes 경로에서 Save 가 끝난 직후 setup 모달을
@@ -444,6 +449,8 @@ export default function DraftPage() {
     setNotes({});
     setHasDraftConfig(true);
     setSetupModalOpen(false);
+    // 다음 useEffect 가 새 config 로 PPA 값을 다시 fetch 한다 — overlay 가 그 동안 노출됨.
+    setPendingStartDraft(true);
   };
 
   // 비로그인이면 로그인 모달, 로그인 상태면 setup 모달.
@@ -636,11 +643,14 @@ export default function DraftPage() {
       .then((data) => {
         if (controller.signal.aborted) return;
         setPlayerValues(data.items ?? []);
+        setPendingStartDraft(false);
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
         console.error(err);
         setPlayerValues(null);
+        setPendingStartDraft(false);
+        pushToast("Failed to load player values. Please try again.", "error");
       });
 
     return () => controller.abort();
@@ -848,7 +858,8 @@ export default function DraftPage() {
     draftedByTeamId: string,
     bid: number | null,
     type: DraftPick["type"],
-    kind: DraftPickKind
+    kind: DraftPickKind,
+    broughtUpByTeamId: string | null = null,
   ) => {
     const filtered = picks.filter((p) => p.playerId !== playerId);
     const occupied = new Set(
@@ -870,6 +881,7 @@ export default function DraftPage() {
       const next: DraftPick = {
         playerId,
         draftedByTeamId,
+        broughtUpByTeamId,
         slotIndex,
         slotPos: null,
         bid: null,
@@ -897,6 +909,7 @@ export default function DraftPage() {
     const next: DraftPick = {
       playerId,
       draftedByTeamId,
+      broughtUpByTeamId,
       slotIndex,
       slotPos,
       bid,
@@ -919,16 +932,20 @@ export default function DraftPage() {
     openAddModal(player);
   };
 
-  const handleAddFinish = (bid: number) => {
+  const handleAddFinish = (bid: number, broughtUpByTeamId: string) => {
     if (!addTarget || !myTeam) return;
-    if (!addPickToState(addTarget.id, myTeam.id, bid, "mine", "main")) return;
+    if (!addPickToState(addTarget.id, myTeam.id, bid, "mine", "main", broughtUpByTeamId)) return;
     closeAddModal();
     draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const handleTakenFinish = (draftedByTeamId: string, bid: number | null) => {
+  const handleTakenFinish = (
+    draftedByTeamId: string,
+    bid: number | null,
+    broughtUpByTeamId: string | null,
+  ) => {
     if (!takenTarget) return;
-    if (!addPickToState(takenTarget.id, draftedByTeamId, bid, "taken", boardView)) return;
+    if (!addPickToState(takenTarget.id, draftedByTeamId, bid, "taken", boardView, broughtUpByTeamId)) return;
     closeTakenModal();
     draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -1201,6 +1218,7 @@ export default function DraftPage() {
               onViewChange={setBoardView}
               onRemovePick={handleRemovePick}
               onSlotReassign={handleSlotReassign}
+              onOpenHistory={() => setHistoryModalOpen(true)}
             />
           ) : (
             <section className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
@@ -1281,6 +1299,7 @@ export default function DraftPage() {
           key={`add-${addTarget.id}`}
           open={true}
           player={addTarget}
+          teams={teams}
           remainingBudget={remainingBudget}
           onClose={closeAddModal}
           onConfirm={handleAddFinish}
@@ -1396,7 +1415,46 @@ export default function DraftPage() {
         onAuthSuccess={() => setSetupModalOpen(true)}
       />
 
+      <OrderedDraftHistoryModal
+        open={historyModalOpen}
+        picks={picks}
+        teams={teams}
+        playersById={playersById}
+        onClose={() => setHistoryModalOpen(false)}
+      />
+
       <Toast toasts={toasts} onDismiss={dismissToast} />
+
+      {pendingStartDraft && (
+        <div className="fixed inset-0 z-100 grid place-items-center bg-black/50 backdrop-blur-md">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/15 bg-[#0c1220] px-6 py-5 shadow-2xl">
+            <svg
+              className="h-5 w-5 animate-spin text-white/80"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <circle
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="3"
+                className="opacity-25"
+              />
+              <path
+                d="M4 12a8 8 0 0 1 8-8"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+              />
+            </svg>
+            <div className="text-sm font-black text-white">
+              Loading player values...
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
