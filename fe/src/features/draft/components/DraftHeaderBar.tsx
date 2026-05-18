@@ -100,7 +100,7 @@ export default function DraftHeaderBar({
             <button
               type="button"
               onClick={onNew}
-              className="rounded-2xl border border-sky-400/30 bg-sky-500/10 px-4 py-3 text-sm font-black text-sky-200 transition hover:bg-sky-500/20"
+              className="rounded-2xl bg-white px-4 py-3 text-sm font-black text-black transition hover:bg-zinc-100"
               title="Start a fresh draft session (re-configure budget / teams / roster)"
             >
               New

@@ -51,6 +51,7 @@ import {
   DEFAULT_POSITION_FILTERS,
   PITCHER_SORT_OPTIONS,
   UNSAVED_DRAFT_KEY,
+  arePlayersComparable,
   buildTeamsFromConfig,
   initialNameFor,
   isPitcherPositionFilter,
@@ -349,8 +350,9 @@ export default function DraftPage() {
     return calculateCurrentRound(teams.length, rosterSize, picks);
   }, [teams.length, rosterSize, picks]);
 
-  const selectedA = players.find((player) => player.id === compareAId) ?? null;
-  const selectedB = players.find((player) => player.id === compareBId) ?? null;
+  // 포지션 필터를 바꾸면 paginated `players` 에서 사라질 수 있으므로 전체 lookup 사용.
+  const selectedA = compareAId ? playersById[compareAId] ?? null : null;
+  const selectedB = compareBId ? playersById[compareBId] ?? null : null;
 
   const openAddModal = (player: DraftPlayer) => {
     setAddTarget(player);
@@ -644,6 +646,7 @@ export default function DraftPage() {
   }, [authed, config, picks]);
 
   // Toggle player selection for A/B comparison (max 2 players).
+  // 타자/투수 혼합 비교는 차단하고 토스트로 안내한다.
   const handleCompareToggle = (playerId: string) => {
     if (!authed) return;
     if (comparisonOpen) setComparisonOpen(false);
@@ -656,6 +659,19 @@ export default function DraftPage() {
 
     if (compareBId === playerId) {
       setCompareBId(null);
+      return;
+    }
+
+    const candidate = playersById[playerId];
+    if (!candidate) return;
+    const counterpart = !compareAId
+      ? selectedB
+      : !compareBId
+        ? selectedA
+        : selectedA; // 둘 다 차 있으면 B 를 교체 → A 와 비교 가능해야 함
+
+    if (counterpart && !arePlayersComparable(candidate, counterpart)) {
+      pushToast("타자와 투수는 함께 비교할 수 없어요.", "error");
       return;
     }
 
