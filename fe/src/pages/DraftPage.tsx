@@ -48,10 +48,9 @@ import {
   isEligibleForSlot,
 } from "../features/draft/utils";
 import {
-  BATTER_SORT_OPTIONS,
+  buildSortOptions,
   DEFAULT_DRAFT_CONFIG,
   DEFAULT_POSITION_FILTERS,
-  PITCHER_SORT_OPTIONS,
   UNSAVED_DRAFT_KEY,
   arePlayersComparable,
   buildTeamsFromConfig,
@@ -59,12 +58,8 @@ import {
   isPitcherPositionFilter,
   matchesPositionFilter,
   mergePlayersWithValues,
-  powerSortValue,
-  primaryRateSortValue,
-  productionSortValue,
   removeUnsavedDraftStorage,
   setActiveDraftSessionId,
-  speedSortValue,
   type DraftPlayersResponse,
   type DraftPlayerValuesResponse,
   type SessionsListResponse,
@@ -72,6 +67,7 @@ import {
 } from "../features/draft/draftHelpers";
 
 import DraftRoomBoard from "../features/draft/components/DraftRoomBoard";
+import TeamStandings from "../features/draft/components/TeamStandings";
 import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
 import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
@@ -207,16 +203,26 @@ export default function DraftPage() {
   const [sort, setSort] = useState<DraftSort>("score_desc");
   const [page, setPage] = useState(1);
 
-  // Filter/sort options are no longer returned by the server — use the constants directly
+  // Filter/sort options are no longer returned by the server — derived locally.
   const positionFilters = DEFAULT_POSITION_FILTERS;
   const showingPitcherColumns = isPitcherPositionFilter(position);
-  const sortOptions = showingPitcherColumns ? PITCHER_SORT_OPTIONS : BATTER_SORT_OPTIONS;
 
   // The user-selected 5 stat columns (separately for batters/pitchers) — persisted in localStorage.
   const { batterCols, pitcherCols, setBatterCols, setPitcherCols, resetToDefaults: resetStatColumns } = useStatColumns();
   const activeStatKeys = showingPitcherColumns ? pitcherCols : batterCols;
   // If a slot is null, the header label is an empty string too — so neighboring columns don't shift.
   const statColumnLabels = activeStatKeys.map((k) => (k ? getStatDef(k)?.label ?? k : ""));
+
+  // Sort dropdown options track the currently selected stat columns — "By Score" + one entry per filled slot.
+  const sortOptions = useMemo(() => buildSortOptions(activeStatKeys), [activeStatKeys]);
+
+  // If the current sort key drops out of the available options (e.g. user removed that
+  // stat from the strip, or switched between batter/pitcher groups), fall back to "score_desc".
+  useEffect(() => {
+    if (!sortOptions.some((opt) => opt.value === sort)) {
+      setSort("score_desc");
+    }
+  }, [sortOptions, sort]);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -317,19 +323,19 @@ export default function DraftPage() {
     result = result.filter((p) => matchesPositionFilter(p.positions, position));
 
     const sorted = [...result].sort((a, b) => {
-      switch (sort) {
-        case "avg_desc":
-          return primaryRateSortValue(b) - primaryRateSortValue(a);
-        case "hr_desc":
-          return powerSortValue(b) - powerSortValue(a);
-        case "rbi_desc":
-          return productionSortValue(b) - productionSortValue(a);
-        case "sb_desc":
-          return speedSortValue(b) - speedSortValue(a);
-        case "score_desc":
-        default:
-          return (b.ppaValue ?? 0) - (a.ppaValue ?? 0);
+      // Dynamic stat sort — `stat:KEY` uses the StatDef accessor for whichever
+      // column the user picked. lowerIsBetter (ERA / WHIP / etc.) flips direction.
+      if (typeof sort === "string" && sort.startsWith("stat:")) {
+        const key = sort.slice(5);
+        const def = getStatDef(key);
+        if (def) {
+          const av = def.accessor(a) ?? 0;
+          const bv = def.accessor(b) ?? 0;
+          return def.lowerIsBetter ? av - bv : bv - av;
+        }
       }
+      // Fallback / "score_desc" — PPA-DUN value, highest first.
+      return (b.ppaValue ?? 0) - (a.ppaValue ?? 0);
     });
 
     return sorted;
@@ -1418,6 +1424,18 @@ export default function DraftPage() {
         onStartDraft={openStartDraft}
         onRename={openRenameModal}
       />
+
+      {authed && hasDraftConfig && config && (
+        <FadeIn delayMs={45}>
+          <TeamStandings
+            teams={teams}
+            picks={picks}
+            playerValues={playerValues}
+            budget={config.budget}
+            rosterPlayers={config.rosterPlayers}
+          />
+        </FadeIn>
+      )}
 
       <FadeIn delayMs={60}>
         <div ref={draftRoomTopRef}>

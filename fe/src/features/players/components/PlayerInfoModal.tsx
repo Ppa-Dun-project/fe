@@ -68,6 +68,7 @@ type PlayerDetailResponse = {
   positions: string[];
   valueScore: number;
   headshotUrl?: string | null;
+  nationality?: string | null;
   batterStats?: BatterStats | null;
   pitcherStats?: PitcherStats | null;
   // This player's depth-chart order within the MLB team's (team, position). 1=starter. null=unknown.
@@ -251,7 +252,7 @@ export default function PlayerInfoModal({ open, playerId, playerType = "batter",
                   { label: "Team", value: detail.team },
                   { label: "Positions", value: detail.positions.join(", ") },
                   { label: "Player ID", value: String(detail.id) },
-                  { label: "Nationality", value: "-" },
+                  { label: "Nationality", value: detail.nationality ?? "-" },
                 ].map((info) => (
                   <div key={info.label} className="rounded-xl border border-white/10 bg-[#111628] p-3">
                     <div className="text-[10px] font-black uppercase tracking-wide text-white/45">{info.label}</div>
