@@ -243,26 +243,28 @@ export default function DraftPage() {
   // 메모 — playerId → note. 로드 모드에서만 fetch/저장 동작 (세션 ID 필요).
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [noteTarget, setNoteTarget] = useState<DraftPlayer | null>(null);
-  // 15초마다 백엔드 알림 폴링. 한 cycle에서 새 이벤트가 여러 개 들어오면
-  // toast 폭격을 피하려고 한 개로 합쳐서 보여준다 (가장 최근 이벤트 메시지 + 카운트).
+  // 15초마다 백엔드 알림 폴링. 한 cycle 의 새 이벤트는 각각 토스트로 띄운다 —
+  // 10초씩 화면에 머무름. 단 11개 이상 들어오면 위쪽 토스트 stack 이 화면을 다 덮어
+  // 사용자가 정보 확인을 못 하므로 최신 10개만 띄우고 나머지는 summary 한 줄로 묶는다.
   useNotificationPolling((evs: NotificationEvent[]) => {
     if (evs.length === 0) return;
 
-    if (evs.length === 1) {
-      const ev = evs[0];
+    const HARD_CAP = 10;
+    // id 오름차순으로 들어오므로 최신 N개는 뒤쪽. cap 보다 적으면 그대로 다 표시.
+    const visible = evs.slice(-HARD_CAP);
+    const overflow = evs.length - visible.length;
+
+    for (const ev of visible) {
       const { prefix, variant } = notificationDisplay(ev.event_type);
       pushToast(`${prefix} — ${ev.message}`, variant);
-      return;
     }
 
-    // 여러 개 — 가장 최근 (id가 가장 큰) 이벤트를 대표로 표시하고 나머지는 카운트로.
-    const sorted = [...evs].sort((a, b) => b.id - a.id);
-    const latest = sorted[0];
-    const { prefix, variant } = notificationDisplay(latest.event_type);
-    pushToast(
-      `${prefix} — ${latest.message} (+${evs.length - 1} more)`,
-      variant
-    );
+    if (overflow > 0) {
+      pushToast(
+        `🔔 ${overflow} older notification${overflow > 1 ? "s" : ""} not shown`,
+        "info"
+      );
+    }
   }, authed);
 
   // Save / Import 모달

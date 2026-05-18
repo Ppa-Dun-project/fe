@@ -23,7 +23,7 @@ const VARIANT_CLASS: Record<ToastVariant, string> = {
   depth: "border-amber-400/60 bg-amber-500/25 text-amber-50",
 };
 
-const DEFAULT_DISMISS_MS = 5000;
+const DEFAULT_DISMISS_MS = 10000;
 
 export default function Toast({ toasts, onDismiss }: Props) {
   // 각 toast 가 마운트되면 (개별 durationMs 또는 기본 시간 후) 자동 dismiss.
