@@ -9,8 +9,7 @@ type Props = {
   // 마이너/택시 보드는 bid 가 없음 — 입력 필드/검증 건너뛰고 bid=null 로 confirm.
   kind?: DraftPickKind;
   onClose: () => void;
-  // Brought Up — 메인 only (마이너/택시는 무료 픽이라 nominator 개념 없음 → null).
-  onConfirm: (draftedByTeamId: string, bid: number | null, broughtUpByTeamId: string | null) => void;
+  onConfirm: (draftedByTeamId: string, bid: number | null) => void;
 };
 
 export default function TakenBidModal({
@@ -29,7 +28,6 @@ export default function TakenBidModal({
 
   // 부모가 player.id 로 `key` 를 지정해 모달을 remount → useState 초기값이 매번 새로 평가됨.
   const [draftedByTeamId, setDraftedByTeamId] = useState(initialTeamId);
-  const [broughtUpByTeamId, setBroughtUpByTeamId] = useState(initialTeamId);
   const [bid, setBid] = useState("");
   const [minBidErrorOpen, setMinBidErrorOpen] = useState(false);
   const [budgetErrorOpen, setBudgetErrorOpen] = useState(false);
@@ -82,9 +80,8 @@ export default function TakenBidModal({
 
   const handleConfirm = () => {
     if (!validTeam) return;
-    // 마이너/택시는 bid 가 없으니 그대로 confirm. brought-up 도 null.
     if (!isMainKind) {
-      onConfirm(draftedByTeamId, null, null);
+      onConfirm(draftedByTeamId, null);
       return;
     }
     if (!Number.isFinite(parsedBid) || parsedBid < 1) {
@@ -95,8 +92,7 @@ export default function TakenBidModal({
       openBudgetError();
       return;
     }
-    if (!broughtUpByTeamId) return;
-    onConfirm(draftedByTeamId, parsedBid, broughtUpByTeamId);
+    onConfirm(draftedByTeamId, parsedBid);
   };
 
   return (
@@ -142,23 +138,6 @@ export default function TakenBidModal({
                 ))}
               </select>
             </div>
-
-            {isMainKind && (
-              <div className="border-t border-white/10 pt-4">
-                <div className="text-xs font-extrabold text-white/70">Brought Up by</div>
-                <select
-                  value={broughtUpByTeamId}
-                  onChange={(e) => setBroughtUpByTeamId(e.target.value)}
-                  className="mt-2 w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm font-extrabold text-white outline-none transition hover:bg-white/5 focus:border-rose-400/35"
-                >
-                  {teams.map((t) => (
-                    <option key={t.id} value={t.id} className="bg-zinc-950 text-white">
-                      {t.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
 
             {isMainKind && (
               <div className="border-t border-white/10 pt-4">

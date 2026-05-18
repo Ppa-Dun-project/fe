@@ -1,6 +1,5 @@
 // Ordered draft history — main-board picks in chronological order.
-// Columns: Pick # | Brought Up | Player | Position | MLB Team | Won | Bid.
-// 옛 세션은 broughtUpByTeamId 가 null 일 수 있어 "—" 로 표시.
+// Columns: Pick # | Player | Position | MLB Team | Drafted by | Bid.
 
 import Modal from "../../../components/ui/Modal";
 import type { DraftPick, DraftPlayer, DraftTeam } from "../../../types/draft";
@@ -43,21 +42,17 @@ export default function OrderedDraftHistoryModal({
             <thead className="sticky top-0 bg-[#0c1220] text-xs font-black uppercase tracking-wider text-white/55">
               <tr>
                 <th className="px-3 py-2.5 font-black">Pick #</th>
-                <th className="px-3 py-2.5 font-black">Brought Up</th>
                 <th className="px-3 py-2.5 font-black">Player</th>
                 <th className="px-3 py-2.5 font-black">Position</th>
                 <th className="px-3 py-2.5 font-black">MLB Team</th>
-                <th className="px-3 py-2.5 font-black">Won</th>
+                <th className="px-3 py-2.5 font-black">Drafted by</th>
                 <th className="px-3 py-2.5 text-right font-black">Bid</th>
               </tr>
             </thead>
             <tbody>
               {mainPicks.map((pick, idx) => {
                 const player = playersById[pick.playerId];
-                const brought = pick.broughtUpByTeamId
-                  ? teamNameById[pick.broughtUpByTeamId] ?? "—"
-                  : "—";
-                const won = teamNameById[pick.draftedByTeamId] ?? "—";
+                const draftedBy = teamNameById[pick.draftedByTeamId] ?? "—";
                 const positions = player?.positions?.join("/") ?? pick.slotPos ?? "—";
                 return (
                   <tr
@@ -65,13 +60,12 @@ export default function OrderedDraftHistoryModal({
                     className="border-t border-white/5 hover:bg-white/[0.04]"
                   >
                     <td className="px-3 py-2 font-black text-white/80">{idx + 1}</td>
-                    <td className="px-3 py-2 text-white/70">{brought}</td>
                     <td className="px-3 py-2 font-black text-white">
                       {player?.name ?? pick.playerId}
                     </td>
                     <td className="px-3 py-2 text-white/70">{positions}</td>
                     <td className="px-3 py-2 text-white/70">{player?.team ?? "—"}</td>
-                    <td className="px-3 py-2 font-bold text-white/80">{won}</td>
+                    <td className="px-3 py-2 font-bold text-white/80">{draftedBy}</td>
                     <td className="px-3 py-2 text-right font-black text-emerald-300">
                       {typeof pick.bid === "number" ? `$${pick.bid}` : "—"}
                     </td>

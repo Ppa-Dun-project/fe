@@ -105,10 +105,7 @@ export type DraftPickKind = "main" | "minor" | "taxi";
  */
 export type DraftPick = {
   playerId: string;              // 뽑은 선수 ID
-  draftedByTeamId: string;       // 뽑은 팀 ID (Won)
-  // 옥션 드래프트에서 선수를 지명한 팀 (Brought Up). 마이너/택시는 무료 픽이라 null.
-  // 옛 세션은 백엔드에서 null 로 옴 → UI 는 "—" 로 표시.
-  broughtUpByTeamId?: string | null;
+  draftedByTeamId: string;       // 뽑은 팀 ID
   slotIndex: number;             // 로스터 슬롯 번호
   slotPos: string | null;        // 슬롯 포지션 — 마이너/택시는 null
   bid: number | null;            // 낙찰가 ($) — 마이너/택시는 null

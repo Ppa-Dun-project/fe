@@ -1,34 +1,29 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import type { DraftPlayer, DraftTeam } from "../../../types/draft";
+import { useEffect, useRef, useState } from "react";
+import type { DraftPlayer } from "../../../types/draft";
 
 type Props = {
   open: boolean;
   player: DraftPlayer | null;
-  teams: DraftTeam[];
   remainingBudget: number;
   // 부모가 모달이 열릴 때 단건 호출로 채워 넣는 추천 bid (in-flight 동안 null + bidLoading=true).
   recommendedBid: number | null;
   bidLoading: boolean;
   onClose: () => void;
-  onConfirm: (bid: number, broughtUpByTeamId: string) => void;
+  onConfirm: (bid: number) => void;
 };
 
 export default function AddBidModal({
   open,
   player,
-  teams,
   remainingBudget,
   recommendedBid,
   bidLoading,
   onClose,
   onConfirm,
 }: Props) {
-  const myTeam = useMemo(() => teams.find((t) => t.isMine) ?? teams[0], [teams]);
-
   // 부모가 player.id 로 `key` 를 지정해 모달을 remount → useState 초기값이 매번 새로 평가됨.
   // bid input 은 항상 빈 문자열로 시작 — 추천값은 placeholder 로만 안내.
   const [bid, setBid] = useState("");
-  const [broughtUpByTeamId, setBroughtUpByTeamId] = useState(myTeam?.id ?? "");
   const [minBidErrorOpen, setMinBidErrorOpen] = useState(false);
   const [budgetErrorOpen, setBudgetErrorOpen] = useState(false);
   const minBidTimerRef = useRef<number | null>(null);
@@ -83,8 +78,7 @@ export default function AddBidModal({
       openBudgetError();
       return;
     }
-    if (!broughtUpByTeamId) return;
-    onConfirm(parsedBid, broughtUpByTeamId);
+    onConfirm(parsedBid);
   };
 
   return (
@@ -112,21 +106,6 @@ export default function AddBidModal({
           </div>
 
           <div className="mt-6 space-y-5">
-            <div>
-              <div className="text-xs font-extrabold text-white/70">Brought Up by</div>
-              <select
-                value={broughtUpByTeamId}
-                onChange={(e) => setBroughtUpByTeamId(e.target.value)}
-                className="mt-2 w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm font-extrabold text-white outline-none transition hover:bg-white/5 focus:border-emerald-400/35"
-              >
-                {teams.map((t) => (
-                  <option key={t.id} value={t.id} className="bg-zinc-950 text-white">
-                    {t.name}
-                  </option>
-                ))}
-              </select>
-            </div>
-
             <div>
               <div className="text-xs font-extrabold text-white/70">Winning Bid</div>
               <div className="mt-2 flex items-center gap-2">

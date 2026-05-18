@@ -75,7 +75,7 @@ import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
 import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
 import PlayerNotePopover from "../features/draft/components/PlayerNotePopover";
-import CustomizeStatsModal from "../features/draft/components/CustomizeStatsModal";
+import StatPickerStrip from "../features/draft/components/StatPickerStrip";
 import SaveSessionModal from "../features/draft/components/SaveSessionModal";
 import NewDraftConfirmModal from "../features/draft/components/NewDraftConfirmModal";
 import ImportSessionsModal from "../features/draft/components/ImportSessionsModal";
@@ -194,7 +194,6 @@ export default function DraftPage() {
 
   // 사용자가 선택한 5개 스탯 (타자/투수 별도) — localStorage에 영구 저장.
   const { batterCols, pitcherCols, setBatterCols, setPitcherCols } = useStatColumns();
-  const [customizeStatsOpen, setCustomizeStatsOpen] = useState(false);
   const activeStatKeys = showingPitcherColumns ? pitcherCols : batterCols;
   const statColumnLabels = activeStatKeys.map((k) => getStatDef(k)?.label ?? k);
 
@@ -859,7 +858,6 @@ export default function DraftPage() {
     bid: number | null,
     type: DraftPick["type"],
     kind: DraftPickKind,
-    broughtUpByTeamId: string | null = null,
   ) => {
     const filtered = picks.filter((p) => p.playerId !== playerId);
     const occupied = new Set(
@@ -881,7 +879,6 @@ export default function DraftPage() {
       const next: DraftPick = {
         playerId,
         draftedByTeamId,
-        broughtUpByTeamId,
         slotIndex,
         slotPos: null,
         bid: null,
@@ -909,7 +906,6 @@ export default function DraftPage() {
     const next: DraftPick = {
       playerId,
       draftedByTeamId,
-      broughtUpByTeamId,
       slotIndex,
       slotPos,
       bid,
@@ -945,20 +941,16 @@ export default function DraftPage() {
       .finally(() => setAddTargetBidLoading(false));
   };
 
-  const handleAddFinish = (bid: number, broughtUpByTeamId: string) => {
+  const handleAddFinish = (bid: number) => {
     if (!addTarget || !myTeam) return;
-    if (!addPickToState(addTarget.id, myTeam.id, bid, "mine", "main", broughtUpByTeamId)) return;
+    if (!addPickToState(addTarget.id, myTeam.id, bid, "mine", "main")) return;
     closeAddModal();
     draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const handleTakenFinish = (
-    draftedByTeamId: string,
-    bid: number | null,
-    broughtUpByTeamId: string | null,
-  ) => {
+  const handleTakenFinish = (draftedByTeamId: string, bid: number | null) => {
     if (!takenTarget) return;
-    if (!addPickToState(takenTarget.id, draftedByTeamId, bid, "taken", boardView, broughtUpByTeamId)) return;
+    if (!addPickToState(takenTarget.id, draftedByTeamId, bid, "taken", boardView)) return;
     closeTakenModal();
     draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -1268,7 +1260,6 @@ export default function DraftPage() {
         }}
         hasDraftConfig={hasDraftConfig}
         remainingBudget={remainingBudget}
-        onOpenCustomizeStats={() => setCustomizeStatsOpen(true)}
       />
 
       <ComparisonPanel
@@ -1279,6 +1270,12 @@ export default function DraftPage() {
         onClearB={clearCompareB}
         onClearAll={clearCompare}
         onOpenComparison={() => setComparisonOpen(true)}
+      />
+
+      <StatPickerStrip
+        group={showingPitcherColumns ? "pitcher" : "batter"}
+        cols={showingPitcherColumns ? pitcherCols : batterCols}
+        onChange={showingPitcherColumns ? setPitcherCols : setBatterCols}
       />
 
       <PlayerListTable
@@ -1312,7 +1309,6 @@ export default function DraftPage() {
           key={`add-${addTarget.id}`}
           open={true}
           player={addTarget}
-          teams={teams}
           remainingBudget={remainingBudget}
           recommendedBid={addTargetBid}
           bidLoading={addTargetBidLoading}
@@ -1347,18 +1343,6 @@ export default function DraftPage() {
         playerType={profilePlayerType}
         onClose={closePlayerInfo}
       />
-
-      {customizeStatsOpen && (
-        <CustomizeStatsModal
-          onClose={() => setCustomizeStatsOpen(false)}
-          batterCols={batterCols}
-          pitcherCols={pitcherCols}
-          onSave={(group, cols) => {
-            if (group === "batter") setBatterCols(cols);
-            else setPitcherCols(cols);
-          }}
-        />
-      )}
 
       {noteTarget && (
         <PlayerNotePopover
