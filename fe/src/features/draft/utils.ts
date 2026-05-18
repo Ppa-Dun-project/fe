@@ -1,23 +1,63 @@
-import type { DraftConfigLocal, DraftPick, DraftTeam } from "../../types/draft";
+import type {
+  DraftConfigLocal,
+  DraftPick,
+  DraftTeam,
+  RosterSlotCounts,
+  RosterSlotPosition,
+} from "../../types/draft";
 
-const DRAFT_CONFIG_KEY = "ppadun_draft_config";
-
-const DEFAULT_CONFIG: DraftConfigLocal = {
-  myTeamName: "My Team",
-  oppTeamNames: [],
-  opponentsCount: 5,
-  leagueType: "standard",
-  budget: 260,
-  rosterPlayers: 12,
+/**
+ * 기본 14-슬롯 구성:
+ *   C, 1B, 2B, 3B, SS, OF×3, UTIL, SP×2, RP×2, BENCH×3
+ */
+export const DEFAULT_ROSTER_SLOTS: RosterSlotCounts = {
+  C: 1, "1B": 1, "2B": 1, "3B": 1, SS: 1,
+  OF: 3, UTIL: 1,
+  SP: 2, RP: 2,
+  BENCH: 3,
 };
 
-const ROSTER_SLOT_TEMPLATE = [
+/** 합계 = rosterPlayers 가 되어야 한다는 검증용. */
+export function sumRosterSlots(slots: RosterSlotCounts): number {
+  return Object.values(slots).reduce((sum, n) => sum + n, 0);
+}
+
+export const DEFAULT_CONFIG = {
+  myTeamName: "My Team",
+  oppTeamNames: [] as string[],
+  opponentsCount: 0,
+  leagueType: "AL",
+  budget: 260,
+  rosterPlayers: sumRosterSlots(DEFAULT_ROSTER_SLOTS),
+  rosterSlots: DEFAULT_ROSTER_SLOTS,
+} satisfies DraftConfigLocal;
+
+// 옵션 A: 픽 추가 시 클라이언트가 즉시 slotIndex/slotPos 결정.
+// 슬롯 인덱스 → 포지션 매핑은 백엔드와 동일한 베이스 템플릿을 그대로 사용.
+// 옛 세션 (rosterSlots 없는 경우) 의 fallback 으로 남겨둠.
+export const SLOT_TEMPLATE_BASE = [
   "SP", "SP", "RP", "SP", "RP",
   "C", "1B", "2B", "3B", "SS",
   "OF", "OF", "OF", "UTIL", "UTIL",
   "BENCH", "BENCH", "BENCH", "BENCH", "BENCH",
   "BENCH", "BENCH", "BENCH", "BENCH", "BENCH",
+] as const;
+
+// rosterSlots 가 있을 때 사용할 동적 슬롯 빌더.
+// 순서: SP, RP, C, 1B, 2B, 3B, SS, OF, UTIL, BENCH
+// (Draft board 가 사용자가 정한 카운트대로 슬롯을 그리도록 한다.)
+const SLOT_ORDER: RosterSlotPosition[] = [
+  "SP", "RP", "C", "1B", "2B", "3B", "SS", "OF", "UTIL", "BENCH",
 ];
+
+export function buildSlotTemplateFromCounts(slots: RosterSlotCounts): string[] {
+  const out: string[] = [];
+  for (const pos of SLOT_ORDER) {
+    const n = slots[pos] ?? 0;
+    for (let i = 0; i < n; i += 1) out.push(pos);
+  }
+  return out;
+}
 
 const TEAM_PALETTE = [
   { header: "border-rose-400/30 bg-rose-500/10 text-rose-200", slot: "border-rose-400/20 bg-rose-500/8", text: "text-rose-200" },
@@ -51,35 +91,14 @@ const MLB_TEAM_CLASSES: Record<string, string> = {
   SEA: "bg-teal-500/15 text-teal-200 border-teal-400/25",
 };
 
-/** Read draft config from localStorage; fall back to defaults on missing/invalid data. */
-export function readDraftConfig(): DraftConfigLocal {
-  try {
-    const raw = localStorage.getItem(DRAFT_CONFIG_KEY);
-    if (!raw) return { ...DEFAULT_CONFIG };
-
-    const parsed = JSON.parse(raw) as DraftConfigLocal;
-    return {
-      myTeamName: parsed.myTeamName || DEFAULT_CONFIG.myTeamName,
-      oppTeamNames: parsed.oppTeamNames ?? DEFAULT_CONFIG.oppTeamNames,
-      opponentsCount: parsed.opponentsCount ?? DEFAULT_CONFIG.opponentsCount,
-      leagueType: parsed.leagueType || DEFAULT_CONFIG.leagueType,
-      budget: parsed.budget ?? DEFAULT_CONFIG.budget,
-      rosterPlayers: parsed.rosterPlayers ?? DEFAULT_CONFIG.rosterPlayers,
-      createdAt: parsed.createdAt,
-    };
-  } catch {
-    return { ...DEFAULT_CONFIG };
-  }
-}
-
-/** Enforce roster size bounds: 8 ≤ n ≤ 25. */
+/** Enforce roster size bounds: 1 ≤ n ≤ 25. */
 export function clampRosterSize(n?: number) {
-  return Math.min(Math.max(n ?? 12, 8), 25);
+  return Math.min(Math.max(n ?? 12, 1), 25);
 }
 
 /** Build roster slot layout for the given number of players. */
 export function buildSlotTemplate(count: number): string[] {
-  return ROSTER_SLOT_TEMPLATE.slice(0, count);
+  return SLOT_TEMPLATE_BASE.slice(0, count) as unknown as string[];
 }
 
 /** Team color classes for the draft board. My team uses sky palette; others rotate. */
@@ -94,15 +113,8 @@ export function mlbTeamBadgeClass(team: string): string {
 
 /** Format batting average as ".300" (no leading zero). */
 export function formatAvg(avg: number | null) {
-  if (!avg) return "-";
+  if (avg === null || avg === undefined) return "-";
   return avg.toFixed(3).replace("0.", ".");
-}
-
-/** PPA value style — blurred for unauthenticated users. */
-export function valueClass(v: number, authed: boolean) {
-  if (!authed) return "blur-sm select-none text-emerald-400/60";
-  if (v >= 10) return "text-emerald-300 drop-shadow-[0_0_12px_rgba(16,185,129,0.55)]";
-  return "text-emerald-400";
 }
 
 /** Draft cost style — blurred for unauthenticated users. */
@@ -110,31 +122,52 @@ export function draftCostClass(authed: boolean) {
   return authed ? "text-white/80" : "blur-sm select-none text-white/50";
 }
 
-/** Find first open slot: exact position → UTIL → BENCH. Returns -1 if full. */
-export function findAvailableSlotIndex(
-  teamId: string,
-  desiredPos: string,
-  slotTemplate: string[],
-  picks: DraftPick[]
-) {
-  const occupied = new Set(
-    picks.filter((p) => p.draftedByTeamId === teamId).map((p) => p.slotIndex)
-  );
+/**
+ * 선수의 positions 가 해당 슬롯의 position 에 대해 자격을 가지는지 확인.
+ *   BENCH: 누구든 OK
+ *   UTIL:  비투수면 OK (positions 에 SP/RP 만 있으면 불가)
+ *   그 외 (C, 1B, 2B, 3B, SS, OF, SP, RP): 정확히 매칭
+ */
+export function isEligibleForSlot(
+  playerPositions: readonly string[] | undefined,
+  slotPos: string
+): boolean {
+  if (slotPos === "BENCH") return true;
+  const positions = playerPositions ?? [];
+  if (slotPos === "UTIL") {
+    return positions.some((p) => p !== "SP" && p !== "RP");
+  }
+  return positions.includes(slotPos);
+}
 
-  const findBy = (pred: (slot: string) => boolean) => {
-    for (let i = 0; i < slotTemplate.length; i += 1) {
-      if (!occupied.has(i) && pred(slotTemplate[i])) return i;
-    }
-    return -1;
-  };
+/**
+ * occupied 가 아닌 슬롯 중 player 자격에 맞는 첫 인덱스를 반환.
+ * 자격 매칭 우선 순위는 slotTemplate 의 등장 순서(SP, RP, C, 1B, ... BENCH).
+ * → 본인 고유 포지션이 비어 있으면 그쪽 먼저, 아니면 UTIL/BENCH 로 fallback.
+ * 없으면 -1.
+ */
+export function findEligibleSlotIndex(
+  playerPositions: readonly string[] | undefined,
+  slotTemplate: readonly string[],
+  occupied: Set<number>
+): number {
+  for (let i = 0; i < slotTemplate.length; i += 1) {
+    if (occupied.has(i)) continue;
+    if (isEligibleForSlot(playerPositions, slotTemplate[i])) return i;
+  }
+  return -1;
+}
 
-  const exact = findBy((s) => s === desiredPos);
-  if (exact !== -1) return exact;
-
-  const util = findBy((s) => s === "UTIL");
-  if (util !== -1) return util;
-
-  return findBy((s) => s === "BENCH");
+/**
+ * rosterPlayers 만큼 자른 SLOT_TEMPLATE_BASE 에서 occupied 슬롯을 제외한 첫 빈 자리 인덱스.
+ * 전부 차 있으면 -1 반환.
+ */
+export function findAvailableSlotIndex(rosterPlayers: number, occupied: Set<number>): number {
+  const limit = Math.min(rosterPlayers, SLOT_TEMPLATE_BASE.length);
+  for (let i = 0; i < limit; i += 1) {
+    if (!occupied.has(i)) return i;
+  }
+  return -1;
 }
 
 /** Remaining budget for a team after subtracting all their bids. */
@@ -145,31 +178,63 @@ export function calculateRemainingBudget(budget: number, myTeamId: string, picks
   return Math.max(0, budget - spent);
 }
 
-/** Current draft round (1-based), capped at total rounds. */
+/** Current draft round (1-based), capped at total rounds.
+ *  마이너/택시 픽은 메인 진행도에 영향을 주지 않으므로 카운트에서 제외. */
 export function calculateCurrentRound(teamCount: number, rosterSlots: number, picks: DraftPick[]) {
-  return Math.min(rosterSlots, Math.floor(picks.length / teamCount) + 1);
+  const mainCount = picks.filter((p) => p.kind === "main").length;
+  return Math.min(rosterSlots, Math.floor(mainCount / teamCount) + 1);
 }
 
-/** Check if player is available, drafted by me, or taken by opponent. */
+/** 마이너/택시 보드의 슬롯 개수. 메인과 달리 포지션 라벨 없는 평면 슬롯. */
+export const MINOR_TAXI_SLOT_COUNT = 8;
+
+/** 마이너/택시처럼 자격 검사가 없는 보드에서 occupied 가 아닌 첫 빈 슬롯을 반환. 없으면 -1. */
+export function findFirstEmptySlot(occupied: Set<number>, count: number): number {
+  for (let i = 0; i < count; i += 1) {
+    if (!occupied.has(i)) return i;
+  }
+  return -1;
+}
+
+/** Check if player is available, drafted by me, or taken by opponent.
+ *  pickKind 와 teamId 를 함께 노출해 호출 측이 (minor)/(taxi) 프리픽스와 팀 컬러를 적용할 수 있게 한다. */
 export function getPlayerDraftStatus(playerId: string, picks: DraftPick[], teams: DraftTeam[]) {
   const hit = picks.find((p) => p.playerId === playerId);
   if (!hit) return { kind: "available" as const };
 
   const team = teams.find((t) => t.id === hit.draftedByTeamId);
-  const bidLabel = hit.bid ?? "?";
+  const teamName = team?.name ?? (hit.type === "mine" ? "My Team" : "Taken");
+  const pickKind = hit.kind ?? "main";
+  const teamId = hit.draftedByTeamId;
 
+  if (pickKind !== "main") {
+    const boardLabel = pickKind === "minor" ? "Minor" : "Taxi";
+    return {
+      kind: hit.type, // "mine" | "taken" — 기존 분기 그대로
+      pickKind,
+      label: `${boardLabel} - ${teamName}`,
+      teamName,
+      teamId,
+    } as const;
+  }
+
+  const bidLabel = hit.bid ?? "?";
   if (hit.type === "mine") {
     return {
       kind: "mine" as const,
+      pickKind: "main" as const,
       label: `My Pick - $${bidLabel}`,
-      teamName: team?.name ?? "My Team",
+      teamName,
+      teamId,
     };
   }
 
   return {
     kind: "taken" as const,
-    label: `${team?.name ?? "Taken"} - $${bidLabel}`,
-    teamName: team?.name ?? "Taken",
+    pickKind: "main" as const,
+    label: `${teamName} - $${bidLabel}`,
+    teamName,
+    teamId,
   };
 }
 

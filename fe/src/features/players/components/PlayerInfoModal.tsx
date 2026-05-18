@@ -1,36 +1,75 @@
 import { useEffect, useMemo, useState } from "react";
 import { apiGet } from "../../../lib/api";
+import { formatPpa } from "../../../utils/playerValue";
 
 type Props = {
   open: boolean;
   playerId: number | null;
+  playerType?: PlayerType;
   onClose: () => void;
+};
+
+type PlayerType = "batter" | "pitcher";
+
+type BatterStats = {
+  avg: number;
+  pa: number;
+  hr: number;
+  ops: number;
+  rbi: number;
+  ab: number;
+  r: number;
+  h: number;
+  bb: number;
+  k: number;
+  sb: number;
+  cs: number;
+  obp: number;
+  slg: number;
+};
+
+type PitcherStats = {
+  w: number;
+  sv: number;
+  so: number;
+  era: number;
+  whip: number;
+  ip: number;
+  l: number;
+  g: number;
+  gs: number;
+  war: number;
+  fip: number;
+  h: number;
+  r: number;
+  er: number;
+  hr: number;
+  bb: number;
+  hbp: number;
+  bf: number;
+  era_plus: number;
+  h9: number;
+  hr9: number;
+  bb9: number;
+  so9: number;
+  so_bb: number;
 };
 
 type PlayerDetailResponse = {
   id: number;
+  playerType: PlayerType;
   name: string;
   age: number;
   height_in: number;
   weight_lb: number;
-  bats: string;
+  bats?: string | null;
   throws: string;
   team: string;
   positions: string[];
-  headshotUrl?: string | null;
-  stats: {
-    g: number;
-    pa: number;
-    hr: number;
-    ops: number;
-    ip: number;
-  };
-};
-
-type PlayerValueResponse = {
-  playerId: number;
-  name: string;
   valueScore: number;
+  headshotUrl?: string | null;
+  batterStats?: BatterStats | null;
+  pitcherStats?: PitcherStats | null;
 };
 
 const HITTER_POSITIONS = new Set([
@@ -75,11 +114,10 @@ function initialsOf(name: string) {
   return `${first[0]}${second[0]}`.toUpperCase();
 }
 
-export default function PlayerInfoModal({ open, playerId, onClose }: Props) {
+export default function PlayerInfoModal({ open, playerId, playerType = "batter", onClose }: Props) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [detail, setDetail] = useState<PlayerDetailResponse | null>(null);
-  const [valueScore, setValueScore] = useState<number | null>(null);
 
   useEffect(() => {
     if (!open) return;
@@ -90,6 +128,7 @@ export default function PlayerInfoModal({ open, playerId, onClose }: Props) {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
+  // 상세 API 단일 호출 — 응답에 valueScore 가 이미 포함되어 있으므로 별도 /value 호출은 불필요.
   useEffect(() => {
     if (!open || playerId === null) return;
 
@@ -99,38 +138,18 @@ export default function PlayerInfoModal({ open, playerId, onClose }: Props) {
       setError(null);
     });
 
-    Promise.allSettled([
-      apiGet<PlayerDetailResponse>(`/api/players/${playerId}`, undefined, controller.signal),
-      apiGet<PlayerValueResponse>(`/api/players/${playerId}/value`, undefined, controller.signal),
-    ])
-      .then((results) => {
+    apiGet<PlayerDetailResponse>(
+      `/api/players/${playerId}`,
+      { playerType },
+      controller.signal
+    )
+      .then((data) => {
         if (controller.signal.aborted) return;
-
-        const detailResult = results[0];
-        const valueResult = results[1];
-
-        if (detailResult.status === "fulfilled") {
-          setDetail(detailResult.value);
-        } else {
-          setDetail(null);
-          setError(
-            detailResult.reason instanceof Error
-              ? detailResult.reason.message
-              : "Failed to load player detail"
-          );
-          return;
-        }
-
-        if (valueResult.status === "fulfilled") {
-          setValueScore(valueResult.value.valueScore);
-        } else {
-          setValueScore(null);
-        }
+        setDetail(data);
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
         setDetail(null);
-        setValueScore(null);
         setError(err instanceof Error ? err.message : "Failed to load player information");
       })
       .finally(() => {
@@ -138,12 +157,15 @@ export default function PlayerInfoModal({ open, playerId, onClose }: Props) {
       });
 
     return () => controller.abort();
-  }, [open, playerId]);
+  }, [open, playerId, playerType]);
 
   const twoWay = useMemo(() => {
     if (!detail) return false;
     return isTwoWayPlayer(detail.positions);
   }, [detail]);
+
+  const batterStats = detail?.batterStats ?? null;
+  const pitcherStats = detail?.pitcherStats ?? null;
 
   if (!open) return null;
 
@@ -200,7 +222,7 @@ export default function PlayerInfoModal({ open, playerId, onClose }: Props) {
               <div className="rounded-2xl border border-white/20 bg-black/20 px-5 py-3 text-center">
                 <div className="text-[11px] font-black uppercase tracking-wide text-white/60">PPA-DUN Value</div>
                 <div className="mt-1 text-3xl font-black text-emerald-300">
-                  {valueScore === null ? "-" : valueScore.toFixed(1)}
+                  {formatPpa(detail.valueScore)}
                 </div>
               </div>
             </div>
@@ -214,7 +236,7 @@ export default function PlayerInfoModal({ open, playerId, onClose }: Props) {
               <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
                 {[
                   { label: "Age", value: String(detail.age) },
-                  { label: "Bats / Throws", value: `${detail.bats} / ${detail.throws}` },
+                  { label: detail.bats ? "Bats / Throws" : "Throws", value: detail.bats ? `${detail.bats} / ${detail.throws}` : detail.throws },
                   { label: "Height", value: formatHeight(detail.height_in) },
                   { label: "Weight", value: formatWeight(detail.weight_lb) },
                   { label: "Team", value: detail.team },
@@ -231,12 +253,17 @@ export default function PlayerInfoModal({ open, playerId, onClose }: Props) {
             </section>
 
             <section>
-              <div className="mb-2 text-sm font-black uppercase tracking-wide text-white/55">Season Stats (Batting)</div>
+              <div className="mb-2 text-sm font-black uppercase tracking-wide text-white/55">
+                Season Stats ({detail.playerType === "pitcher" ? "Pitching" : "Batting"})
+              </div>
               <div className="overflow-x-auto rounded-xl border border-white/10 bg-[#0f1424]">
                 <table className="w-full min-w-[640px]">
                   <thead className="border-b border-white/10 bg-white/5 text-[11px] uppercase tracking-wide text-white/45">
                     <tr>
-                      {["G", "PA", "HR", "OPS", "IP"].map((col) => (
+                      {(detail.playerType === "pitcher"
+                        ? ["ERA", "WHIP", "IP", "SO", "SV"]
+                        : ["AVG", "PA", "HR", "OPS", "RBI"]
+                      ).map((col) => (
                         <th key={col} className="px-3 py-2 text-center font-black">
                           {col}
                         </th>
@@ -245,11 +272,25 @@ export default function PlayerInfoModal({ open, playerId, onClose }: Props) {
                   </thead>
                   <tbody>
                     <tr className="text-center text-sm font-semibold text-white">
-                      <td className="px-3 py-2">{detail.stats.g}</td>
-                      <td className="px-3 py-2">{detail.stats.pa}</td>
-                      <td className="px-3 py-2 text-amber-300">{detail.stats.hr}</td>
-                      <td className="px-3 py-2 text-amber-300">{detail.stats.ops.toFixed(3)}</td>
-                      <td className="px-3 py-2">{detail.stats.ip.toFixed(1)}</td>
+                      {detail.playerType === "pitcher" && pitcherStats ? (
+                        <>
+                          <td className="px-3 py-2">{pitcherStats.era.toFixed(2)}</td>
+                          <td className="px-3 py-2">{pitcherStats.whip.toFixed(3)}</td>
+                          <td className="px-3 py-2">{pitcherStats.ip.toFixed(1)}</td>
+                          <td className="px-3 py-2 text-amber-300">{pitcherStats.so}</td>
+                          <td className="px-3 py-2 text-amber-300">{pitcherStats.sv}</td>
+                        </>
+                      ) : batterStats ? (
+                        <>
+                          <td className="px-3 py-2">{batterStats.avg.toFixed(3)}</td>
+                          <td className="px-3 py-2">{batterStats.pa}</td>
+                          <td className="px-3 py-2 text-amber-300">{batterStats.hr}</td>
+                          <td className="px-3 py-2 text-amber-300">{batterStats.ops.toFixed(3)}</td>
+                          <td className="px-3 py-2">{batterStats.rbi}</td>
+                        </>
+                      ) : (
+                        <td className="px-3 py-2" colSpan={5}>-</td>
+                      )}
                     </tr>
                   </tbody>
                 </table>
@@ -271,7 +312,11 @@ export default function PlayerInfoModal({ open, playerId, onClose }: Props) {
                     This player has both hitter and pitcher positions: {detail.positions.join(", ")}
                   </div>
                   <div className="mt-2 text-white/75">
-                    Pitching workload (IP): {detail.stats.ip.toFixed(1)}
+                    {detail.playerType === "pitcher" && pitcherStats
+                      ? `Pitching workload (IP): ${pitcherStats.ip.toFixed(1)}`
+                      : batterStats
+                        ? `Run production (RBI): ${batterStats.rbi}`
+                        : "No role-specific stats available"}
                   </div>
                 </div>
               </section>

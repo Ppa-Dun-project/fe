@@ -5,6 +5,7 @@
 export type MyTeamPlayer = {
   id: string;
   name: string;
+  playerType: "batter" | "pitcher";
   pos: string;            // 포지션 (단일)
   cost: number;           // 낙찰가 ($)
   team: string;           // MLB 팀
@@ -12,6 +13,12 @@ export type MyTeamPlayer = {
   hr: number;             // 홈런
   rbi: number;            // 타점
   sb: number;             // 도루
+  w?: number | null;
+  sv?: number | null;
+  so?: number | null;
+  era?: number | null;
+  whip?: number | null;
+  ip?: number | null;
   ppaValue: number;       // PPA-DUN 점수
 };
 

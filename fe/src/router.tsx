@@ -1,8 +1,7 @@
 // React Router의 핵심 함수/컴포넌트 가져오기
 // - createBrowserRouter: URL 기반 라우터 생성 (History API 사용)
 // - Navigate: 선언형 리다이렉트 컴포넌트 (다른 URL로 이동)
-// - redirect: 함수형 리다이렉트 (loader 안에서 사용)
-import { createBrowserRouter, Navigate, redirect } from "react-router-dom";
+import { createBrowserRouter, Navigate } from "react-router-dom";
 
 // 공통 레이아웃 — Navbar + 페이지 내용 래퍼
 import AppLayout from "./components/AppLayout";
@@ -30,27 +29,19 @@ export const router = createBrowserRouter([
 
       // 각 URL과 페이지 매핑
       { path: "news", element: <NewsPage /> },
-      { path: "draft", element: <DraftPage /> },
 
-      // :id는 URL 파라미터 (예: /draft/123)
-      // 페이지에서 useParams()로 id 값을 가져올 수 있음
-      { path: "draft/:id", element: <PlayerDetailPage /> },
+      // 미저장 드래프트 모드: sessionStorage 의 ppadun_unsaved_draft 사용
+      { path: "draft", element: <DraftPage /> },
+      // 저장된 세션 모드: 서버에서 SessionDetail 재로드
+      { path: "draft/:sessionId", element: <DraftPage /> },
+
+      // 선수 상세 페이지 — sessionId 와 충돌하지 않도록 /players/:id 에서 직접 서빙
+      { path: "players/:id", element: <PlayerDetailPage /> },
 
       { path: "login", element: <LoginPage /> },
 
       // ── 레거시 URL 호환 리다이렉트 ──
-      // 기존 /players 링크가 있을 수 있으므로 /draft로 자동 이동
-      // replace: URL 히스토리에서 기록을 대체 (뒤로가기 시 중복 방지)
       { path: "players", element: <Navigate to="/draft" replace /> },
-
-      // loader: 페이지 렌더링 전에 실행되는 함수
-      // - 여기서는 URL 파라미터에 따라 다른 곳으로 리다이렉트
-      // - 예: /players/123 → /draft/123
-      {
-        path: "players/:id",
-        loader: ({ params }) => redirect(params.id ? `/draft/${params.id}` : "/draft"),
-      },
-
       { path: "settings", element: <Navigate to="/my-team" replace /> },
 
       // ── 로그인 필요한 페이지 ──

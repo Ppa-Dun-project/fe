@@ -17,7 +17,7 @@ export default function AddBidModal({
   onConfirm,
 }: Props) {
   const initialBid = useMemo(() => {
-    if (!player) return "";
+    if (!player || typeof player.recommendedBid !== "number") return "";
     return String(player.recommendedBid);
   }, [player]);
 
@@ -146,7 +146,7 @@ export default function AddBidModal({
             <div className="border-t border-white/10 pt-4">
               <div className="text-xs font-extrabold text-white/70">Draft cost</div>
               <div className="mt-2 text-3xl font-black text-emerald-400">
-                ${player.recommendedBid}
+                ${player.recommendedBid ?? "—"}
               </div>
               <div className="mt-1 text-xs text-white/35">
                 This is the recommended draft cost baseline.

@@ -1,3 +1,5 @@
+import { getAccessToken } from "./auth";
+
 // ── API 기본 URL 설정 ──
 // import.meta.env: Vite가 제공하는 환경변수 객체 (빌드 타임에 주입됨)
 // VITE_API_BASE_URL: .env 파일에서 설정한 백엔드 주소 (예: "http://localhost:8000")
@@ -116,4 +118,88 @@ export function apiDelete<T>(
   signal?: AbortSignal
 ) {
   return requestJson<T>(buildUrl(path, params), { method: "DELETE", signal });
+}
+
+// ── 인증이 필요한 요청용 헬퍼 ──
+// 아래 apiGetAuth / apiPostAuth / apiDeleteAuth 는
+// Authorization: Bearer <JWT> 헤더를 자동으로 붙여서 요청을 보냄.
+// 토큰이 없으면(비로그인) Error를 throw 하므로 호출부는 .catch 로 처리해야 함.
+
+/**
+ * authHeaders: Authorization 헤더를 조립해 반환
+ * - 토큰이 없으면 명시적으로 에러 throw (헤더 없이 요청되어 401 받는 것보다 빠른 실패가 나음)
+ */
+function authHeaders(): HeadersInit {
+  const token = getAccessToken();
+  if (!token) throw new Error("Missing access token");
+  return { Authorization: `Bearer ${token}` };
+}
+
+/**
+ * 인증이 필요한 GET 요청
+ */
+export function apiGetAuth<T>(
+  path: string,
+  params?: Record<string, QueryValue>,
+  signal?: AbortSignal
+) {
+  return requestJson<T>(buildUrl(path, params), {
+    signal,
+    headers: authHeaders(),
+  });
+}
+
+/**
+ * 인증이 필요한 POST 요청
+ */
+export function apiPostAuth<TResponse, TBody>(
+  path: string,
+  body: TBody,
+  params?: Record<string, QueryValue>,
+  signal?: AbortSignal
+) {
+  return requestJson<TResponse>(buildUrl(path, params), {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+/**
+ * 인증이 필요한 PUT 요청 — 기존 리소스 부분/전체 갱신
+ */
+export function apiPutAuth<TResponse, TBody>(
+  path: string,
+  body: TBody,
+  params?: Record<string, QueryValue>,
+  signal?: AbortSignal
+) {
+  return requestJson<TResponse>(buildUrl(path, params), {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      ...authHeaders(),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+}
+
+/**
+ * 인증이 필요한 DELETE 요청
+ */
+export function apiDeleteAuth<T>(
+  path: string,
+  params?: Record<string, QueryValue>,
+  signal?: AbortSignal
+) {
+  return requestJson<T>(buildUrl(path, params), {
+    method: "DELETE",
+    headers: authHeaders(),
+    signal,
+  });
 }

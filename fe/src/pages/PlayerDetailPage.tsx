@@ -3,26 +3,35 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { apiGet } from "../lib/api";
+import { formatPpa } from "../utils/playerValue";
 
 type PlayerDetailResponse = {
   id: number;
+  playerType: "batter" | "pitcher";
   name: string;
   age: number;
   height_in: number;
   weight_lb: number;
-  bats: string;
+  bats?: string | null;
   throws: string;
   team: string;
   positions: string[];
   valueScore: number;
   headshotUrl?: string | null;
-  stats: {
-    g: number;
+  batterStats?: {
+    avg: number;
     pa: number;
     hr: number;
     ops: number;
+    rbi: number;
+  } | null;
+  pitcherStats?: {
+    era: number;
+    whip: number;
     ip: number;
-  };
+    so: number;
+    sv: number;
+  } | null;
 };
 
 export default function PlayerDetailPage() {
@@ -104,23 +113,35 @@ export default function PlayerDetailPage() {
           </div>
         </div>
         <div className="rounded-2xl bg-white/10 px-4 py-2 text-sm font-black text-white">
-          ValueScore {player.valueScore.toFixed(1)}
+          ValueScore {formatPpa(player.valueScore)}
         </div>
       </div>
 
       <div className="mt-6 grid gap-3 text-sm text-white/80 md:grid-cols-2">
         <div>Age: {player.age}</div>
-        <div>B/T: {player.bats}/{player.throws}</div>
+        <div>{player.bats ? `B/T: ${player.bats}/${player.throws}` : `Throws: ${player.throws}`}</div>
         <div>Height: {player.height_in} in</div>
         <div>Weight: {player.weight_lb} lb</div>
       </div>
 
       <div className="mt-6 grid grid-cols-2 gap-3 rounded-2xl border border-white/10 bg-black/25 p-4 text-sm text-white/80 md:grid-cols-5">
-        <div>G: {player.stats.g}</div>
-        <div>PA: {player.stats.pa}</div>
-        <div>HR: {player.stats.hr}</div>
-        <div>OPS: {player.stats.ops.toFixed(3)}</div>
-        <div>IP: {player.stats.ip.toFixed(1)}</div>
+        {player.playerType === "pitcher" && player.pitcherStats ? (
+          <>
+            <div>ERA: {player.pitcherStats.era.toFixed(2)}</div>
+            <div>WHIP: {player.pitcherStats.whip.toFixed(3)}</div>
+            <div>IP: {player.pitcherStats.ip.toFixed(1)}</div>
+            <div>SO: {player.pitcherStats.so}</div>
+            <div>SV: {player.pitcherStats.sv}</div>
+          </>
+        ) : player.batterStats ? (
+          <>
+            <div>AVG: {player.batterStats.avg.toFixed(3)}</div>
+            <div>PA: {player.batterStats.pa}</div>
+            <div>HR: {player.batterStats.hr}</div>
+            <div>OPS: {player.batterStats.ops.toFixed(3)}</div>
+            <div>RBI: {player.batterStats.rbi}</div>
+          </>
+        ) : null}
       </div>
 
       <Link to="/draft" className="mt-6 inline-block text-sm font-black text-white/70 hover:text-white">

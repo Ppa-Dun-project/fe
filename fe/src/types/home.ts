@@ -9,6 +9,21 @@ export type NewsItem = {
   publishedAt: string;     // 발행 시간 (ISO 문자열)
   url?: string;            // 원문 링크 (선택)
   source?: string;         // 출처 (선택, 예: "MLB.com")
+  imageUrl?: string;       // 썸네일 이미지 URL (선택, 없으면 텍스트만 표시)
+};
+
+/**
+ * InjuredPlayer: HomePage Injured Players strip + popup에서 사용
+ * 백엔드 GET /api/players/injured 응답 형태와 1:1 매칭
+ */
+export type InjuredPlayer = {
+  player_id: number;       // MLB stable ID — headshot URL에 사용
+  name: string;
+  position?: string;       // OF / 3B / SP ...
+  team?: string;           // NYY / LAA ...
+  primary_number?: string; // jersey number (#)
+  injury_status: string;   // Day-To-Day / 10-Day IL / Out ...
+  player_value?: number;   // 0~100 fantasy value (정렬에만 사용)
 };
 
 /**

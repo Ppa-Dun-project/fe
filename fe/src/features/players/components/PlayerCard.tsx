@@ -1,4 +1,5 @@
 import type { Player } from "../../../types/player";
+import { formatPpa } from "../../../utils/playerValue";
 
 type Props = {
   player: Player;
@@ -20,7 +21,7 @@ export default function PlayerCard({ player, onClick }: Props) {
         </div>
 
         <div className="rounded-xl bg-white/10 px-3 py-1 text-xs font-black text-white">
-          {player.valueScore.toFixed(1)}
+          {formatPpa(player.valueScore)}
         </div>
       </div>
 

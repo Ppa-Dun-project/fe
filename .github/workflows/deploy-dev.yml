@@ -51,6 +51,8 @@ jobs:
 
       - name: Build
         working-directory: fe
+        env:
+          VITE_GOOGLE_CLIENT_ID: ${{ secrets.VITE_GOOGLE_CLIENT_ID }}
         run: npm run build
 
       - name: Authenticate to Google Cloud

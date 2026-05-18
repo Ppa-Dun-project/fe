@@ -2,220 +2,322 @@
 // Displays: draft board (team rosters), player list with search/filter/sort,
 // player comparison panel, Add/Taken bid modals, and player info modal.
 //
-// Data flow:
-//   1. On mount, GET /api/draft/bootstrap fetches config, teams, picks, filter/sort options
-//   2. Player list is fetched from GET /api/draft/players (re-fetches on search/filter/sort change)
-//   3. Draft picks are mutated via POST/DELETE /api/draft/picks
+// Option A 데이터 흐름:
+//   1. 마운트 분기:
+//      - useParams.sessionId 있음 → GET /api/draft/sessions/{id} → React state
+//      - sessionId 없음 → sessionStorage["ppadun_unsaved_draft"] → React state
+//      - 둘 다 없으면 홈으로 리다이렉트
+//   2. 공개 GET /api/draft/players → 선수 목록 (값 없음)
+//   3. POST /api/draft/players/values, body { config, picks } → 머지용 값
+//   4. 픽 추가/삭제는 React state 만 갱신. 미저장 모드면 sessionStorage 도 sync.
+//   5. Save 버튼만이 유일한 서버 커밋 포인트 (POST 또는 PUT /api/draft/sessions[/id]).
 //
-// Auth-gated features: draft board, Add/Taken actions, player comparison, PPA-DUN values.
+// Filtering, sorting, and pagination all run client-side on the merged list.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useNavigate, useParams, useSearchParams } from "react-router-dom";
 import FadeIn from "../components/ui/FadeIn";
-import Skeleton from "../components/ui/Skeleton";
-import Dropdown from "../components/ui/Dropdown";
 import { useAuth } from "../lib/auth";
-import { apiDelete, apiGet, apiPost } from "../lib/api";
-import { DRAFT_ROOM_ID } from "../lib/runtimeConfig";
+import { apiGet, apiGetAuth, apiPostAuth, apiPutAuth, apiDeleteAuth } from "../lib/api";
 
 import type {
-  DraftConfigLocal,
+  DraftConfigServer,
   DraftPick,
+  DraftPickKind,
   DraftPlayer,
+  DraftPlayerPublic,
+  DraftPlayerValue,
   DraftPositionFilter,
   DraftSort,
   DraftTeam,
+  SessionDetail,
+  SessionSummary,
 } from "../types/draft";
 type DraftPosition = DraftPlayer["positions"][number];
 
 import {
-  buildSlotTemplate,
+  DEFAULT_ROSTER_SLOTS,
+  MINOR_TAXI_SLOT_COUNT,
+  buildSlotTemplateFromCounts,
   calculateCurrentRound,
   calculateRemainingBudget,
   clampRosterSize,
-  draftCostClass,
-  formatAvg,
-  getPlayerDraftStatus,
-  mlbTeamBadgeClass,
-  readDraftConfig,
-  valueClass,
+  findEligibleSlotIndex,
+  findFirstEmptySlot,
+  isEligibleForSlot,
 } from "../features/draft/utils";
+import {
+  BATTER_SORT_OPTIONS,
+  DEFAULT_DRAFT_CONFIG,
+  DEFAULT_POSITION_FILTERS,
+  PITCHER_SORT_OPTIONS,
+  UNSAVED_DRAFT_KEY,
+  buildTeamsFromConfig,
+  initialNameFor,
+  isPitcherPositionFilter,
+  matchesPositionFilter,
+  mergePlayersWithValues,
+  powerSortValue,
+  primaryRateSortValue,
+  productionSortValue,
+  removeUnsavedDraftStorage,
+  setActiveDraftSessionId,
+  speedSortValue,
+  type DraftPlayersResponse,
+  type DraftPlayerValuesResponse,
+  type SessionsListResponse,
+  type UnsavedDraft,
+} from "../features/draft/draftHelpers";
 
 import DraftRoomBoard from "../features/draft/components/DraftRoomBoard";
 import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
 import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
+import PlayerNotePopover from "../features/draft/components/PlayerNotePopover";
+import CustomizeStatsModal from "../features/draft/components/CustomizeStatsModal";
+import SaveSessionModal from "../features/draft/components/SaveSessionModal";
+import NewDraftConfirmModal from "../features/draft/components/NewDraftConfirmModal";
+import ImportSessionsModal from "../features/draft/components/ImportSessionsModal";
+import PlayerListTable from "../features/draft/components/PlayerListTable";
+import DraftHeaderBar from "../features/draft/components/DraftHeaderBar";
+import PlayerSearchToolbar from "../features/draft/components/PlayerSearchToolbar";
+import ComparisonPanel from "../features/draft/components/ComparisonPanel";
+import { useStatColumns } from "../features/draft/useStatColumns";
+import { getStatDef } from "../features/draft/statColumns";
+import { useDraftSessionLoader } from "../features/draft/useDraftSessionLoader";
+import { useNotificationPolling } from "../hooks/useNotificationPolling";
+import type { NotificationEvent } from "../types/notifications";
 import PlayerInfoModal from "../features/players/components/PlayerInfoModal";
-import Pagination from "../features/players/components/Pagination";
+import Modal from "../components/ui/Modal";
+import Toast, { type ToastMessage, type ToastVariant } from "../components/ui/Toast";
+import { useUndoStack } from "../hooks/useUndoStack";
+import { useUndoKeyboardShortcuts } from "../hooks/useUndoKeyboardShortcuts";
+import DraftSetupCard, { type DraftSetupConfig } from "../features/home/DraftSetupCard";
+import LoginPromptModal from "../features/auth/LoginPromptModal";
 
 const PAGE_SIZE = 30;
 
-const DEFAULT_POSITION_FILTERS: DraftPositionFilter[] = [
-  "ALL",
-  "C",
-  "1B",
-  "2B",
-  "3B",
-  "SS",
-  "OF",
-  "UTIL",
-  "SP",
-  "RP",
-];
-
-const DEFAULT_SORT_OPTIONS: { value: DraftSort; label: string }[] = [
-  { value: "score_desc", label: "By Score" },
-  { value: "cost_desc", label: "By Draft Cost" },
-  { value: "avg_desc", label: "By AVG" },
-  { value: "hr_desc", label: "By HR" },
-  { value: "rbi_desc", label: "By RBI" },
-  { value: "sb_desc", label: "By SB" },
-];
-
-type DraftConfigResponse = {
-  leagueType: string;
-  budget: number;
-  rosterPlayers: number;
-  myTeamName: string;
-  opponentsCount: number;
-  oppTeamNames: string[];
-};
-
-type DraftSortOptionResponse = {
-  value: string;
-  label: string;
-};
-
-type DraftBootstrapResponse = {
-  config: DraftConfigResponse;
-  teams: DraftTeam[];
-  positionFilters: string[];
-  sortOptions: DraftSortOptionResponse[];
-  picks: DraftPick[];
-};
-
-type DraftPlayersResponse = {
-  items: DraftPlayer[];
-  page: number;
-  limit: number;
-  total: number;
-  totalPages: number;
-};
-
-type DraftPicksResponse = {
-  userId: string;
-  items: DraftPick[];
-};
-
-type DraftPickUpsertIn = {
-  playerId: string;
-  draftedByTeamId: string;
-  slotPos: DraftPosition;
-  bid: number | null;
-  type: DraftPick["type"];
-};
-
-function toInitialConfig(local: DraftConfigLocal): DraftConfigResponse {
-  return {
-    leagueType: local.leagueType ?? "standard",
-    budget: local.budget ?? 260,
-    rosterPlayers: local.rosterPlayers ?? 12,
-    myTeamName: (local.myTeamName ?? "My Team").trim() || "My Team",
-    opponentsCount: local.opponentsCount ?? 5,
-    oppTeamNames: local.oppTeamNames ?? [],
-  };
-}
-
-function cleanSortLabel(label: string) {
-  return label.replace(/\s*\((asc|desc)\)\s*/gi, "").trim();
-}
-
-function normalizeSortOptions(raw: DraftSortOptionResponse[]) {
-  const preferred: DraftSort[] = [
-    "score_desc",
-    "cost_desc",
-    "avg_desc",
-    "hr_desc",
-    "rbi_desc",
-    "sb_desc",
-  ];
-
-  const byValue = new Map(raw.map((option) => [option.value, option]));
-  const seenLabels = new Set<string>();
-  const normalized: { value: DraftSort; label: string }[] = [];
-
-  for (const value of preferred) {
-    const option = byValue.get(value);
-    if (!option) continue;
-
-    const label = cleanSortLabel(option.label);
-    const key = label.toLowerCase();
-    if (seenLabels.has(key)) continue;
-
-    seenLabels.add(key);
-    normalized.push({ value, label });
-  }
-
-  return normalized.length > 0 ? normalized : DEFAULT_SORT_OPTIONS;
-}
-
-function normalizePositionFilters(raw: string[]): DraftPositionFilter[] {
-  const allowed = new Set(DEFAULT_POSITION_FILTERS);
-  const normalized = raw.filter((position): position is DraftPositionFilter =>
-    allowed.has(position as DraftPositionFilter)
-  );
-  return normalized.length > 0 ? normalized : DEFAULT_POSITION_FILTERS;
-}
-
-function resolveDraftSlotPosition(player: DraftPlayer): DraftPosition {
-  return (player.positions[0] ?? "UTIL") as DraftPosition;
-}
+// Pure helpers, constants, and inline response/payload types live in
+// `draftHelpers.ts` so this file stays focused on orchestration. See that
+// module for: matchesPositionFilter, isPitcherOnly, isPitcherPositionFilter,
+// formatNumber, formatDraftStatSummary, sort-value accessors,
+// buildTeamsFromConfig, normalizeDraftPicks, mergePlayersWithValues,
+// readUnsavedDraftStorage / removeUnsavedDraftStorage, DEFAULT_DRAFT_CONFIG,
+// DEFAULT_POSITION_FILTERS, BATTER_/PITCHER_SORT_OPTIONS, etc.
 
 export default function DraftPage() {
   const authed = useAuth();
+  const navigate = useNavigate();
+  const { sessionId: sessionIdParam } = useParams();
+  const sessionId = sessionIdParam ? Number(sessionIdParam) : null;
+  const isLoadedMode = sessionId !== null && Number.isFinite(sessionId);
+
   const [searchParams] = useSearchParams();
   const draftRoomTopRef = useRef<HTMLDivElement | null>(null); // Scroll target after draft pick
 
-  // Read draft config from localStorage (set on HomePage's DraftSetupCard).
-  const localConfig = useMemo(() => readDraftConfig(), []);
+  // "Start Your Draft" 버튼이 띄우는 setup / 로그인 유도 모달.
+  const [setupModalOpen, setSetupModalOpen] = useState(false);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
 
-  // Core draft state — populated by the bootstrap API call.
-  const [config, setConfig] = useState<DraftConfigResponse>(() => toInitialConfig(localConfig));
-  const [teams, setTeams] = useState<DraftTeam[]>([]);       // All teams in the draft room
-  const [picks, setPicks] = useState<DraftPick[]>([]);       // All draft picks made so far
-  const [players, setPlayers] = useState<DraftPlayer[]>([]); // Player list (filtered/sorted)
+  // "New" → "Save first?" Yes 경로에서 Save 가 끝난 직후 setup 모달을
+  // 자동으로 열기 위한 플래그. Save 모달이 cancel 되면 클리어.
+  const [postSaveAction, setPostSaveAction] = useState<"setup" | null>(null);
+
+  // "New" 클릭 시 띄우는 3-버튼 확인 모달 — 미저장 상태에서만 사용.
+  const [newConfirmOpen, setNewConfirmOpen] = useState(false);
+
+  // Toast queue. id 는 monotonic counter 로 부여한다.
+  const toastIdRef = useRef(0);
+  const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  const pushToast = (
+    text: string,
+    variant: ToastVariant = "info",
+    durationMs?: number,
+  ) => {
+    toastIdRef.current += 1;
+    const id = toastIdRef.current;
+    setToasts((prev) => [...prev, { id, text, variant, durationMs }]);
+  };
+  const dismissToast = (id: number) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
+  };
+
+  // 핵심 드래프트 state — 마운트 시 한 번 채워지고 이후 모든 픽 변경은 React state 만 갱신.
+  const [config, setConfig] = useState<DraftConfigServer | null>(null);
+  const [hasDraftConfig, setHasDraftConfig] = useState(false);
+  const [teams, setTeams] = useState<DraftTeam[]>([]);
+  // picks 는 useUndoStack 으로 관리해 undo / redo 를 지원한다.
+  //   - commitPicks: 사용자 행동에 의한 변경 (영입/제거/슬롯 이동) → 이력에 push
+  //   - resetPicks:  세션 전환 / 새 draft 시작 등 이력을 끊는 변경
+  const {
+    state: picks,
+    commit: commitPicks,
+    reset: resetPicks,
+    undo: undoPicks,
+    redo: redoPicks,
+    canUndo: canUndoPicks,
+    canRedo: canRedoPicks,
+  } = useUndoStack<DraftPick[]>([]);
+
+  // 키보드 단축키 — Ctrl/Cmd+Z = undo, Ctrl+Y / Ctrl·Cmd+Shift+Z = redo.
+  // input / textarea / contenteditable 안에서는 무시 (브라우저 기본 undo 유지).
+  useUndoKeyboardShortcuts({
+    onUndo: undoPicks,
+    onRedo: redoPicks,
+    canUndo: canUndoPicks,
+    canRedo: canRedoPicks,
+  });
+  const [sessionName, setSessionName] = useState<string | null>(null);
+  const [bootstrapped, setBootstrapped] = useState(false);
+
+  // 공개 API 에서 받아온 기본 목록 (값 없음)
+  const [publicPlayers, setPublicPlayers] = useState<DraftPlayerPublic[]>([]);
+  // 인증 API 에서 받아온 값 테이블 — 비로그인 또는 조회 실패 시 null
+  const [playerValues, setPlayerValues] = useState<DraftPlayerValue[] | null>(null);
 
   const [query, setQuery] = useState(() => searchParams.get("query")?.trim() ?? "");
-  const [position, setPosition] = useState<DraftPositionFilter>("ALL");
+  const [position, setPosition] = useState<DraftPositionFilter>("C");
   const [sort, setSort] = useState<DraftSort>("score_desc");
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
 
-  const [positionFilters, setPositionFilters] =
-    useState<DraftPositionFilter[]>(DEFAULT_POSITION_FILTERS);
-  const [sortOptions, setSortOptions] =
-    useState<{ value: DraftSort; label: string }[]>(DEFAULT_SORT_OPTIONS);
+  // 필터/정렬 옵션은 더 이상 서버가 내려주지 않음 — 상수 그대로 사용
+  const positionFilters = DEFAULT_POSITION_FILTERS;
+  const showingPitcherColumns = isPitcherPositionFilter(position);
+  const sortOptions = showingPitcherColumns ? PITCHER_SORT_OPTIONS : BATTER_SORT_OPTIONS;
+
+  // 사용자가 선택한 5개 스탯 (타자/투수 별도) — localStorage에 영구 저장.
+  const { batterCols, pitcherCols, setBatterCols, setPitcherCols } = useStatColumns();
+  const [customizeStatsOpen, setCustomizeStatsOpen] = useState(false);
+  const activeStatKeys = showingPitcherColumns ? pitcherCols : batterCols;
+  const statColumnLabels = activeStatKeys.map((k) => getStatDef(k)?.label ?? k);
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Player comparison state — user selects two players (A and B) to compare side-by-side.
+  // Player comparison state
   const [compareAId, setCompareAId] = useState<string | null>(null);
   const [compareBId, setCompareBId] = useState<string | null>(null);
   const [comparisonOpen, setComparisonOpen] = useState(false);
-  const [profilePlayerId, setProfilePlayerId] = useState<number | null>(null);     // Player info modal
+  const [profilePlayerId, setProfilePlayerId] = useState<number | null>(null);
+  const [profilePlayerType, setProfilePlayerType] = useState<"batter" | "pitcher">("batter");
 
-  // Modal targets — which player the user clicked "Add" or "Taken" on.
+  // 현재 보고 있는 보드 — 메인/마이너/택시. DraftRoomBoard 의 포스트잇 탭으로 전환.
+  // Add/Taken 액션은 이 view 의 kind 로 픽을 생성한다.
+  const [boardView, setBoardView] = useState<DraftPickKind>("main");
+
   const [addTarget, setAddTarget] = useState<DraftPlayer | null>(null);
   const [takenTarget, setTakenTarget] = useState<DraftPlayer | null>(null);
 
-  // Derived values (memoized to avoid recalculation on every render).
-  const rosterSlots = useMemo(() => clampRosterSize(config.rosterPlayers), [config.rosterPlayers]);
-  const slotTemplate = useMemo(() => buildSlotTemplate(rosterSlots), [rosterSlots]);
+  // 메모 — playerId → note. 로드 모드에서만 fetch/저장 동작 (세션 ID 필요).
+  const [notes, setNotes] = useState<Record<string, string>>({});
+  const [noteTarget, setNoteTarget] = useState<DraftPlayer | null>(null);
+  const [noteSaving, setNoteSaving] = useState(false);
+
+  // 부상/뎁스 변경 알림 받은 선수 id 집합 — 페이지 떠나기 전까지 row에 빨간 점 표시.
+  const [affectedPlayerIds, setAffectedPlayerIds] = useState<Set<string>>(new Set());
+
+  // 15초마다 백엔드 알림 폴링. 새 이벤트마다 toast + affectedPlayerIds 업데이트.
+  // event_type 별로 prefix와 색을 다르게 → 사용자가 한눈에 종류 파악 가능.
+  // 토스트는 8초간 유지 (기본 3.5초보다 길게) 해서 메시지 읽을 시간 확보.
+  useNotificationPolling((ev: NotificationEvent) => {
+    const isInjury = ev.event_type === "INJURY";
+    const isDepth = ev.event_type === "DEPTH";
+    const prefix = isInjury
+      ? "🏥 INJURY UPDATE"
+      : isDepth
+        ? "📊 DEPTH CHART UPDATE"
+        : "🔔 NOTIFICATION";
+    const variant: ToastVariant = isInjury
+      ? "injury"
+      : isDepth
+        ? "depth"
+        : "info";
+
+    pushToast(`${prefix} — ${ev.message}`, variant, 8000);
+
+    setAffectedPlayerIds((prev) => {
+      const next = new Set(prev);
+      next.add(ev.player_id);
+      return next;
+    });
+  }, authed);
+
+  // Save / Import 모달
+  const [saveModalOpen, setSaveModalOpen] = useState(false);
+  const [saveNameInput, setSaveNameInput] = useState("");
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+
+  const rosterSize = useMemo(
+    () => clampRosterSize(config?.rosterPlayers),
+    [config?.rosterPlayers]
+  );
+  // 옛 세션엔 rosterSlots 가 없을 수 있으므로 기본값 fallback.
+  const rosterSlotCounts = useMemo(
+    () => config?.rosterSlots ?? DEFAULT_ROSTER_SLOTS,
+    [config?.rosterSlots]
+  );
+  const slotTemplate = useMemo(
+    () => buildSlotTemplateFromCounts(rosterSlotCounts),
+    [rosterSlotCounts]
+  );
+
+  // 공개 선수 목록 + 인증 값 목록을 playerId 로 머지한 최종 UI 목록
+  const allPlayers = useMemo<DraftPlayer[]>(
+    () => mergePlayersWithValues(publicPlayers, playerValues),
+    [publicPlayers, playerValues]
+  );
+
+  // Client-side filter + sort + paginate (server returns full list).
+  const filteredPlayers = useMemo(() => {
+    let result = allPlayers;
+
+    const q = query.trim().toLowerCase();
+    if (q) {
+      result = result.filter(
+        (p) => p.name.toLowerCase().includes(q) || p.team.toLowerCase().includes(q)
+      );
+    }
+
+    result = result.filter((p) => matchesPositionFilter(p.positions, position));
+
+    const sorted = [...result].sort((a, b) => {
+      switch (sort) {
+        case "cost_desc":
+          return (b.recommendedBid ?? 0) - (a.recommendedBid ?? 0);
+        case "avg_desc":
+          return primaryRateSortValue(b) - primaryRateSortValue(a);
+        case "hr_desc":
+          return powerSortValue(b) - powerSortValue(a);
+        case "rbi_desc":
+          return productionSortValue(b) - productionSortValue(a);
+        case "sb_desc":
+          return speedSortValue(b) - speedSortValue(a);
+        case "score_desc":
+        default:
+          return (b.ppaValue ?? 0) - (a.ppaValue ?? 0);
+      }
+    });
+
+    return sorted;
+  }, [allPlayers, query, position, sort]);
+
+  const totalPages = Math.max(1, Math.ceil(filteredPlayers.length / PAGE_SIZE));
+
+  // Clamp page if filter reduces totalPages below current page (setState during render)
+  if (page > totalPages) {
+    setPage(1);
+  }
+
+  const players = useMemo(
+    () => filteredPlayers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE),
+    [filteredPlayers, page]
+  );
 
   // Quick lookup: playerId → DraftPlayer object.
   const playersById = useMemo<Record<string, DraftPlayer>>(
-    () => Object.fromEntries(players.map((player) => [player.id, player])),
-    [players]
+    () => Object.fromEntries(allPlayers.map((player) => [player.id, player])),
+    [allPlayers]
   );
 
   const myTeam = teams.find((team) => team.isMine) ?? teams[0] ?? null;
@@ -227,32 +329,28 @@ export default function DraftPage() {
       if (typeof pick.bid !== "number") continue;
       spentByTeam.set(pick.draftedByTeamId, (spentByTeam.get(pick.draftedByTeamId) ?? 0) + pick.bid);
     }
+    const budget = config?.budget ?? 0;
     return Object.fromEntries(
       teams.map((team) => [
         team.id,
-        Math.max(0, config.budget - (spentByTeam.get(team.id) ?? 0)),
+        Math.max(0, budget - (spentByTeam.get(team.id) ?? 0)),
       ])
     ) as Record<string, number>;
-  }, [teams, picks, config.budget]);
+  }, [teams, picks, config?.budget]);
 
   const remainingBudget = useMemo(() => {
-    if (!myTeam) return config.budget;
-    return remainingBudgetByTeam[myTeam.id] ?? calculateRemainingBudget(config.budget, myTeam.id, picks);
-  }, [config.budget, myTeam, picks, remainingBudgetByTeam]);
+    const budget = config?.budget ?? 0;
+    if (!myTeam) return budget;
+    return remainingBudgetByTeam[myTeam.id] ?? calculateRemainingBudget(budget, myTeam.id, picks);
+  }, [config?.budget, myTeam, picks, remainingBudgetByTeam]);
 
   const currentRound = useMemo(() => {
     if (teams.length === 0) return 1;
-    return calculateCurrentRound(teams.length, rosterSlots, picks);
-  }, [teams.length, rosterSlots, picks]);
+    return calculateCurrentRound(teams.length, rosterSize, picks);
+  }, [teams.length, rosterSize, picks]);
 
-  const selectedA = useMemo(
-    () => players.find((player) => player.id === compareAId) ?? null,
-    [players, compareAId]
-  );
-  const selectedB = useMemo(
-    () => players.find((player) => player.id === compareBId) ?? null,
-    [players, compareBId]
-  );
+  const selectedA = players.find((player) => player.id === compareAId) ?? null;
+  const selectedB = players.find((player) => player.id === compareBId) ?? null;
 
   const openAddModal = (player: DraftPlayer) => {
     setAddTarget(player);
@@ -270,59 +368,217 @@ export default function DraftPage() {
     setTakenTarget(null);
   };
 
-  // Bootstrap: fetch initial draft room data (config, teams, picks, filter options).
-  // Runs once on mount using the config saved in localStorage.
-  useEffect(() => {
-    const controller = new AbortController();
+  // 메모 팝오버 — 로드된 세션에서만 사용 가능 (미저장 모드는 버튼 자체가 비활성화됨).
+  const openNoteModal = (player: DraftPlayer) => {
+    setNoteTarget(player);
+  };
 
-    apiGet<DraftBootstrapResponse>(
-      "/api/draft/bootstrap",
-      {
-        leagueType: localConfig.leagueType,
-        budget: localConfig.budget,
-        rosterPlayers: localConfig.rosterPlayers,
-        myTeamName: localConfig.myTeamName,
-        oppTeamNames: localConfig.oppTeamNames?.join(",") || "",
-        opponentsCount: localConfig.opponentsCount,
-        userId: DRAFT_ROOM_ID,
-      },
-      controller.signal
-    )
-      .then((data) => {
-        if (controller.signal.aborted) return;
+  const closeNoteModal = () => {
+    if (noteSaving) return;
+    setNoteTarget(null);
+  };
 
-        setConfig(data.config);
-        setTeams(data.teams);
-        setPicks(data.picks);
+  const handleNoteSave = (note: string) => {
+    if (!noteTarget) return;
+    const playerId = noteTarget.id;
+    const trimmed = note.trim();
 
-        const nextPositions = normalizePositionFilters(data.positionFilters);
-        setPositionFilters(nextPositions);
-        setPosition((prev) => (nextPositions.includes(prev) ? prev : nextPositions[0]));
-
-        const nextSortOptions = normalizeSortOptions(data.sortOptions);
-        setSortOptions(nextSortOptions);
-        setSort((prev) =>
-          nextSortOptions.some((option) => option.value === prev)
-            ? prev
-            : nextSortOptions[0]?.value ?? "score_desc"
-        );
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        console.error(err);
-        setError(err instanceof Error ? err.message : "Failed to bootstrap draft data");
+    const applyLocal = () =>
+      setNotes((prev) => {
+        const next = { ...prev };
+        if (trimmed) next[playerId] = trimmed;
+        else delete next[playerId];
+        return next;
       });
 
-    return () => controller.abort();
-  }, [localConfig]);
+    // 미저장 모드 — sessionStorage 동기화 effect 가 알아서 잡아가므로 여기서 state만 갱신.
+    if (sessionId === null) {
+      applyLocal();
+      setNoteTarget(null);
+      return;
+    }
 
-  // Reset to first page when search/filter/sort changes.
+    // 저장된 세션 — 즉시 서버에 PUT.
+    setNoteSaving(true);
+    apiPutAuth<{ status: string }, { note: string }>(
+      `/api/draft/sessions/${sessionId}/notes/${encodeURIComponent(playerId)}`,
+      { note: trimmed }
+    )
+      .then(() => {
+        applyLocal();
+        setNoteTarget(null);
+      })
+      .catch((err: unknown) => {
+        console.error(err);
+        pushToast("Failed to save note", "error");
+      })
+      .finally(() => setNoteSaving(false));
+  };
+
+  // Start Your Draft 모달에서 입력한 config 로 page state 를 갱신.
+  // sessionStorage 도 함께 저장해 같은 탭에서 이동/새로고침해도 resume 되도록 한다.
+  const handleSetupSubmit = (next: DraftSetupConfig) => {
+    const config: DraftConfigServer = {
+      leagueType: next.leagueType,
+      budget: next.budget,
+      rosterPlayers: next.rosterPlayers,
+      myTeamName: next.myTeamName,
+      opponentsCount: next.opponentsCount,
+      oppTeamNames: next.oppTeamNames,
+      rosterSlots: next.rosterSlots,
+    };
+    try {
+      sessionStorage.setItem(
+        UNSAVED_DRAFT_KEY,
+        JSON.stringify({ config, picks: [], notes: {} } satisfies UnsavedDraft)
+      );
+    } catch {
+      // 쿼터 초과 등은 조용히 무시.
+    }
+    setConfig(config);
+    setTeams(buildTeamsFromConfig(config));
+    resetPicks([]);
+    setNotes({});
+    setHasDraftConfig(true);
+    setSetupModalOpen(false);
+  };
+
+  // 비로그인이면 로그인 모달, 로그인 상태면 setup 모달.
+  const openStartDraft = () => {
+    if (authed) {
+      setSetupModalOpen(true);
+    } else {
+      setLoginModalOpen(true);
+    }
+  };
+
+  // 모든 로컬 상태 / sessionStorage 를 초기화해 "갓 들어온" 상태로 만든 다음
+  // setup 모달을 띄움. 로드 모드였다면 URL 도 /draft 로 바꿔서 사이드 효과 차단.
+  const resetToFreshSetup = () => {
+    try {
+      removeUnsavedDraftStorage();
+    } catch {
+      // 무시
+    }
+    if (isLoadedMode) {
+      navigate("/draft", { replace: true });
+    }
+    setConfig(DEFAULT_DRAFT_CONFIG);
+    setTeams(buildTeamsFromConfig(DEFAULT_DRAFT_CONFIG));
+    resetPicks([]);
+    setNotes({});
+    setHasDraftConfig(false);
+    setSessionName(null);
+    setSetupModalOpen(true);
+  };
+
+  // New 버튼 — 현재 드래프트를 정리하고 새로 시작하는 setup 모달을 띄움.
+  //   - 로드된 세션 (isLoadedMode): 이미 DB 에 저장돼 있으니 즉시 setup.
+  //   - 미저장 드래프트: 3-버튼 확인 모달 (Save first / Discard current / Cancel)
+  //     로 분기. Cancel 은 진짜 abort — 드래프트 상태 변경 없음.
+  const handleNewDraft = () => {
+    if (isLoadedMode) {
+      resetToFreshSetup();
+      return;
+    }
+    setNewConfirmOpen(true);
+  };
+
+  const handleNewConfirmSaveFirst = () => {
+    setNewConfirmOpen(false);
+    setPostSaveAction("setup");
+    openSaveModal();
+  };
+
+  const handleNewConfirmDiscard = () => {
+    setNewConfirmOpen(false);
+    resetToFreshSetup();
+  };
+
+  const handleNewConfirmCancel = () => {
+    // 진짜 cancel — 아무 상태도 변경하지 않음.
+    setNewConfirmOpen(false);
+  };
+
+  // 진행 중인 미저장 draft 폐기 — sessionStorage 비우고 player browser 상태로 복귀.
+  // 저장된 세션(isLoadedMode)은 이 버튼 자체가 노출되지 않으므로 분기 필요 없음.
+  const handleDiscardDraft = () => {
+    if (!window.confirm("Discard the current draft? This cannot be undone.")) return;
+
+    if (isLoadedMode && sessionId !== null && config !== null) {
+      const loadedConfig = config;
+      apiPutAuth<SessionDetail, { name: string; picks: DraftPick[] }>(
+        `/api/draft/sessions/${sessionId}`,
+        { name: sessionName ?? "Draft Room", picks: [] }
+      )
+        .then(() => {
+          resetPicks([]);
+          setTeams(buildTeamsFromConfig(loadedConfig));
+        })
+        .catch((err: unknown) => {
+          console.error("Failed to discard picks:", err);
+          window.alert("Failed to discard picks. Please try again.");
+        });
+      return;
+    }
+
+    try {
+      removeUnsavedDraftStorage();
+    } catch {
+      // ignore
+    }
+    setConfig(DEFAULT_DRAFT_CONFIG);
+    setTeams(buildTeamsFromConfig(DEFAULT_DRAFT_CONFIG));
+    resetPicks([]);
+    setNotes({});
+    setHasDraftConfig(false);
+  };
+
+  // 세션 부트스트랩 + 메모 패치 — 두 useEffect 를 캡슐화한 훅에 위임.
+  // 동작은 100% 동일: 로드 모드는 GET session detail + notes, 미저장 모드는
+  // sessionStorage 에서 resume 또는 DEFAULT_DRAFT_CONFIG 폴백.
+  useDraftSessionLoader({
+    isLoadedMode,
+    sessionId,
+    setConfig,
+    setHasDraftConfig,
+    setTeams,
+    setSessionName,
+    setBootstrapped,
+    setNotes,
+    resetPicks,
+  });
+
+  // My Team 페이지가 "현재 활성 드래프트 세션" 을 알도록 sessionStorage 에 mirror.
+  // 로드 모드 → 그 sessionId, 미저장(또는 fresh) → null.
+  // → My Team 페이지가 옛 URL ?sessionId 로 잘못된 세션을 보여주는 문제 차단.
   useEffect(() => {
-    setPage(1);
-  }, [query, position, sort]);
+    if (isLoadedMode && sessionId !== null) {
+      setActiveDraftSessionId(sessionId);
+    } else {
+      setActiveDraftSessionId(null);
+    }
+  }, [isLoadedMode, sessionId]);
 
-  // Fetch player list whenever search query, position filter, sort, or page changes.
-  // Previous in-flight request is aborted via AbortController.
+  // 미저장 모드에서 picks/notes 가 바뀔 때마다 sessionStorage 에도 sync — 페이지 이동/새로고침 보호.
+  useEffect(() => {
+    if (isLoadedMode || !bootstrapped || !config || !hasDraftConfig) return;
+    try {
+      sessionStorage.setItem(
+        UNSAVED_DRAFT_KEY,
+        JSON.stringify({ config, picks, notes } satisfies UnsavedDraft)
+      );
+    } catch {
+      // 쿼터 초과 등은 조용히 무시 — 새로고침 보호 실패해도 화면 동작에는 영향 없음.
+    }
+  }, [isLoadedMode, bootstrapped, config, hasDraftConfig, picks, notes]);
+
+  // 공개 선수 목록 — leagueType 이 바뀌면 다시 불러온다.
+  // AL/NL 은 ?league= 쿼리로 백엔드 필터링, 그 외(custom 등)는 전체.
+  const leagueQuery =
+    config?.leagueType === "AL" || config?.leagueType === "NL"
+      ? config.leagueType
+      : null;
   useEffect(() => {
     const controller = new AbortController();
     queueMicrotask(() => {
@@ -330,26 +586,19 @@ export default function DraftPage() {
       setError(null);
     });
 
-    apiGet<DraftPlayersResponse>(
-      "/api/draft/players",
-      {
-        query: query.trim() || undefined,
-        position,
-        sort,
-        page,
-        limit: PAGE_SIZE,
-      },
-      controller.signal
-    )
+    const path = leagueQuery
+      ? `/api/draft/players?league=${leagueQuery}`
+      : "/api/draft/players";
+
+    apiGet<DraftPlayersResponse>(path, undefined, controller.signal)
       .then((data) => {
         if (controller.signal.aborted) return;
-        setPlayers(data.items);
-        setTotalPages(Math.max(1, data.totalPages));
+        setPublicPlayers(data.items ?? []);
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
         console.error(err);
-        setPlayers([]);
+        setPublicPlayers([]);
         setError(err instanceof Error ? err.message : "Unknown error");
       })
       .finally(() => {
@@ -359,7 +608,40 @@ export default function DraftPage() {
       });
 
     return () => controller.abort();
-  }, [query, position, sort, page]);
+  }, [leagueQuery]);
+
+  // 인증된 사용자에게만 PPA 값 + 추천 bid 를 불러와 playerId 로 공개 목록과 머지한다.
+  // 로그아웃 시 값을 즉시 지워서 UI 에 남지 않도록 함.
+  // picks/config 가 바뀔 때마다 재호출 — 잔여 예산 변동에 따라 백엔드의 추천 bid 가 갱신되기 때문.
+  // hasDraftConfig 는 의도적으로 의존하지 않음 — 로그인만 하면 (Start Draft 누르기 전에도)
+  // PPA 값이 보여야 한다. 드래프트 시작 전엔 config 가 DEFAULT_DRAFT_CONFIG 로 채워져 있어서
+  // 백엔드가 기본 예산/로스터/상대수로 추천 bid 를 계산해 돌려준다.
+  useEffect(() => {
+    if (!authed || !config) {
+      queueMicrotask(() => setPlayerValues(null));
+      return;
+    }
+
+    const controller = new AbortController();
+
+    apiPostAuth<DraftPlayerValuesResponse, { config: DraftConfigServer; picks: DraftPick[] }>(
+      "/api/draft/players/values",
+      { config, picks },
+      undefined,
+      controller.signal
+    )
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        setPlayerValues(data.items ?? []);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setPlayerValues(null);
+      });
+
+    return () => controller.abort();
+  }, [authed, config, picks]);
 
   // Toggle player selection for A/B comparison (max 2 players).
   const handleCompareToggle = (playerId: string) => {
@@ -406,433 +688,463 @@ export default function DraftPage() {
     setComparisonOpen(false);
   };
 
-  const openPlayerInfo = (rawPlayerId: string) => {
+  const openPlayerInfo = (rawPlayerId: string, playerType: "batter" | "pitcher" | "two_way") => {
     const parsed = Number(rawPlayerId);
     if (!Number.isFinite(parsed)) {
       setError("Invalid player id");
       return;
     }
     setProfilePlayerId(parsed);
+    setProfilePlayerType(playerType === "pitcher" ? "pitcher" : "batter");
   };
 
   const closePlayerInfo = () => {
     setProfilePlayerId(null);
   };
 
-  // Remove a draft pick via DELETE API and update local state.
+  // 픽 제거 — 서버 호출 없이 React state 만 갱신. 미저장 모드면 localStorage sync 는 별도 effect 에서.
   const handleRemovePick = (pick: DraftPick) => {
-    void apiDelete<DraftPicksResponse>(`/api/draft/picks/${pick.playerId}`, { userId: DRAFT_ROOM_ID })
-      .then((data) => setPicks(data.items))
-      .catch((err: unknown) => {
-        console.error(err);
-        setError(err instanceof Error ? err.message : "Failed to remove pick");
-      });
+    commitPicks((prev) => prev.filter((p) => p.playerId !== pick.playerId));
   };
 
-  // "Add" action: draft a player to my team with the given bid amount.
+  // 내 팀 보드 안에서 드래그로 슬롯을 옮길 때:
+  //   - 메인: 자격(isEligibleForSlot) 검사 후 이동/스왑.
+  //   - 마이너/택시: 포지션 자격이 없으니 순수 재정렬(스왑/빈자리 이동).
+  // kind 는 어느 보드의 슬롯을 만지는지 — 같은 kind 내에서만 인덱스 충돌이 발생.
+  // teamId 는 재배치가 일어난 팀 — 내 팀뿐 아니라 opponent 팀의 픽도 사용자가 직접 정리 가능.
+  const handleSlotReassign = (
+    fromIndex: number,
+    toIndex: number,
+    kind: DraftPickKind,
+    teamId: string,
+  ) => {
+    if (fromIndex === toIndex) return;
+
+    const teamPicks = picks.filter(
+      (p) => p.draftedByTeamId === teamId && p.kind === kind
+    );
+    const fromPick = teamPicks.find((p) => p.slotIndex === fromIndex);
+    if (!fromPick) return;
+    const toPick = teamPicks.find((p) => p.slotIndex === toIndex);
+
+    // 마이너/택시: 자격 검사 없이 그냥 스왑/이동.
+    if (kind !== "main") {
+      commitPicks((prev) =>
+        prev.map((p) => {
+          if (p.kind !== kind) return p;
+          if (p.playerId === fromPick.playerId) return { ...p, slotIndex: toIndex };
+          if (toPick && p.playerId === toPick.playerId) return { ...p, slotIndex: fromIndex };
+          return p;
+        })
+      );
+      return;
+    }
+
+    const fromSlotPos = slotTemplate[fromIndex];
+    const toSlotPos = slotTemplate[toIndex];
+    if (!fromSlotPos || !toSlotPos) return;
+
+    const fromPlayer = playersById[fromPick.playerId];
+    if (!fromPlayer) return;
+
+    if (!isEligibleForSlot(fromPlayer.positions, toSlotPos)) {
+      pushToast(`${fromPlayer.name} is not eligible for ${toSlotPos}.`, "error");
+      return;
+    }
+
+    // Empty target → simple move.
+    if (!toPick) {
+      commitPicks((prev) =>
+        prev.map((p) =>
+          p.playerId === fromPick.playerId
+            ? { ...p, slotIndex: toIndex, slotPos: toSlotPos as DraftPosition }
+            : p
+        )
+      );
+      return;
+    }
+
+    // Occupied target → swap only when both directions are eligible.
+    const toPlayer = playersById[toPick.playerId];
+    if (!toPlayer) return;
+    if (!isEligibleForSlot(toPlayer.positions, fromSlotPos)) {
+      pushToast(
+        `Can't swap: ${toPlayer.name} is not eligible for ${fromSlotPos}.`,
+        "error"
+      );
+      return;
+    }
+    commitPicks((prev) =>
+      prev.map((p) => {
+        if (p.playerId === fromPick.playerId) {
+          return { ...p, slotIndex: toIndex, slotPos: toSlotPos as DraftPosition };
+        }
+        if (p.playerId === toPick.playerId) {
+          return { ...p, slotIndex: fromIndex, slotPos: fromSlotPos as DraftPosition };
+        }
+        return p;
+      })
+    );
+  };
+
+  // 픽 추가 시 클라이언트가 즉시 slotIndex 결정.
+  // 같은 playerId 의 기존 픽은 제외 → 같은 팀+kind occupied 슬롯 집합 → 빈 슬롯 찾기.
+  // 메인은 포지션 자격 매칭, 마이너/택시는 그냥 첫 빈 자리.
+  // -1 이면 자리 없음 알림 후 종료.
+  const addPickToState = (
+    playerId: string,
+    draftedByTeamId: string,
+    bid: number | null,
+    type: DraftPick["type"],
+    kind: DraftPickKind
+  ) => {
+    const filtered = picks.filter((p) => p.playerId !== playerId);
+    const occupied = new Set(
+      filtered
+        .filter((p) => p.draftedByTeamId === draftedByTeamId && p.kind === kind)
+        .map((p) => p.slotIndex)
+    );
+    const player = playersById[playerId];
+
+    if (kind !== "main") {
+      const slotIndex = findFirstEmptySlot(occupied, MINOR_TAXI_SLOT_COUNT);
+      if (slotIndex === -1) {
+        pushToast(
+          `No empty ${kind} slot for ${player?.name ?? "this player"}.`,
+          "error"
+        );
+        return false;
+      }
+      const next: DraftPick = {
+        playerId,
+        draftedByTeamId,
+        slotIndex,
+        slotPos: null,
+        bid: null,
+        type,
+        kind,
+      };
+      commitPicks([...filtered, next]);
+      return true;
+    }
+
+    const slotIndex = findEligibleSlotIndex(
+      player?.positions,
+      slotTemplate,
+      occupied
+    );
+    if (slotIndex === -1) {
+      pushToast(
+        `No eligible roster slot for ${player?.name ?? "this player"}.`,
+        "error"
+      );
+      return false;
+    }
+
+    const slotPos = (slotTemplate[slotIndex] ?? "BENCH") as DraftPosition;
+    const next: DraftPick = {
+      playerId,
+      draftedByTeamId,
+      slotIndex,
+      slotPos,
+      bid,
+      type,
+      kind: "main",
+    };
+    commitPicks([...filtered, next]);
+    return true;
+  };
+
+  // Add 버튼 클릭 — 메인이면 bid 모달, 마이너/택시는 바로 추가.
+  const handleAddClick = (player: DraftPlayer) => {
+    if (boardView !== "main") {
+      if (!myTeam) return;
+      if (addPickToState(player.id, myTeam.id, null, "mine", boardView)) {
+        draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+      return;
+    }
+    openAddModal(player);
+  };
+
   const handleAddFinish = (bid: number) => {
     if (!addTarget || !myTeam) return;
-
-    const payload: DraftPickUpsertIn = {
-      playerId: addTarget.id,
-      draftedByTeamId: myTeam.id,
-      slotPos: resolveDraftSlotPosition(addTarget),
-      bid,
-      type: "mine",
-    };
-
-    void apiPost<DraftPicksResponse, DraftPickUpsertIn>(
-      "/api/draft/picks",
-      payload,
-      { userId: DRAFT_ROOM_ID, rosterPlayers: rosterSlots }
-    )
-      .then((data) => {
-        setPicks(data.items);
-        closeAddModal();
-        draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      })
-      .catch((err: unknown) => {
-        console.error(err);
-        setError(err instanceof Error ? err.message : "Failed to save draft pick");
-      });
+    if (!addPickToState(addTarget.id, myTeam.id, bid, "mine", "main")) return;
+    closeAddModal();
+    draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // "Taken" action: record that an opponent team drafted this player.
-  const handleTakenFinish = (draftedByTeamId: string, bid: number) => {
+  const handleTakenFinish = (draftedByTeamId: string, bid: number | null) => {
     if (!takenTarget) return;
+    if (!addPickToState(takenTarget.id, draftedByTeamId, bid, "taken", boardView)) return;
+    closeTakenModal();
+    draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
 
-    const payload: DraftPickUpsertIn = {
-      playerId: takenTarget.id,
-      draftedByTeamId,
-      slotPos: resolveDraftSlotPosition(takenTarget),
-      bid,
-      type: "taken",
-    };
+  // ── Save 버튼 핸들러 ──
+  const openSaveModal = () => {
+    setSaveNameInput(initialNameFor(sessionName));
+    setSaveError(null);
+    setSaveModalOpen(true);
+  };
 
-    void apiPost<DraftPicksResponse, DraftPickUpsertIn>(
-      "/api/draft/picks",
-      payload,
-      { userId: DRAFT_ROOM_ID, rosterPlayers: rosterSlots }
+  const closeSaveModal = () => {
+    setSaveModalOpen(false);
+    setSaveError(null);
+    // 사용자가 Save 를 취소하면 chained post-save action 도 함께 폐기.
+    setPostSaveAction(null);
+  };
+
+  const handleSaveConfirm = () => {
+    const name = saveNameInput.trim();
+    if (!name) {
+      setSaveError("Please enter a name");
+      return;
+    }
+    if (!config) return;
+
+    setSaving(true);
+    setSaveError(null);
+
+    if (isLoadedMode && sessionId !== null) {
+      apiPutAuth<SessionDetail, { name: string; picks: DraftPick[] }>(
+        `/api/draft/sessions/${sessionId}`,
+        { name, picks }
+      )
+        .then((data) => {
+          setSessionName(data.name);
+          // closeSaveModal 은 postSaveAction 도 클리어하므로, chain 동작이
+          // 예약돼 있었다면 그 사실을 먼저 캡처한 뒤 닫는다.
+          const chained = postSaveAction;
+          closeSaveModal();
+          if (chained === "setup") {
+            // 저장된 세션을 그대로 두고 새 setup 으로 이동.
+            resetToFreshSetup();
+          }
+        })
+        .catch((err: unknown) => {
+          console.error(err);
+          setSaveError(err instanceof Error ? err.message : "Save failed");
+        })
+        .finally(() => setSaving(false));
+      return;
+    }
+
+    apiPostAuth<SessionDetail, { name: string; config: DraftConfigServer; picks: DraftPick[] }>(
+      "/api/draft/sessions",
+      { name, config, picks }
     )
-      .then((data) => {
-        setPicks(data.items);
-        closeTakenModal();
-        draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      .then(async (data) => {
+        // 미저장 동안 쌓인 로컬 메모를 새 session_id 로 일괄 PUT.
+        // 개별 실패는 무시 — 메모는 부수 데이터이고, 세션 자체는 이미 성공했음.
+        const noteEntries = Object.entries(notes);
+        if (noteEntries.length > 0) {
+          await Promise.all(
+            noteEntries.map(([playerId, note]) =>
+              apiPutAuth<{ status: string }, { note: string }>(
+                `/api/draft/sessions/${data.id}/notes/${encodeURIComponent(playerId)}`,
+                { note }
+              ).catch((err: unknown) => {
+                console.error(`Failed to flush note for ${playerId}:`, err);
+              })
+            )
+          );
+        }
+
+        try {
+          removeUnsavedDraftStorage();
+        } catch {
+          // 무시
+        }
+        setSaving(false);
+        setSaveModalOpen(false);
+
+        if (postSaveAction === "setup") {
+          // "New" 흐름에서 Yes-save 를 거친 경우 — 새로 만든 세션 URL 로
+          // 이동하지 않고, 곧바로 새 setup 모달을 띄운다. (세션은 DB 에
+          // 저장돼 있으므로 추후 Import 에서 다시 열 수 있다.)
+          setPostSaveAction(null);
+          resetToFreshSetup();
+        } else {
+          navigate(`/draft/${data.id}`, { replace: true });
+        }
+      })
+      .catch((err: unknown) => {
+        setSaving(false);
+        const msg = err instanceof Error ? err.message : "";
+        if (msg.includes("Maximum 3 sessions")) {
+          alert("You can save up to 3 sessions. Please delete an existing session and try again.");
+        } else {
+          setSaveError(msg || "Save failed");
+        }
+      });
+  };
+
+  // ── Import 모달 핸들러 ──
+  const [sessionList, setSessionList] = useState<SessionSummary[]>([]);
+  const [sessionListLoading, setSessionListLoading] = useState(false);
+
+  const refreshSessionList = () => {
+    setSessionListLoading(true);
+    apiGetAuth<SessionsListResponse>("/api/draft/sessions")
+      .then((data) => setSessionList(data.items ?? []))
+      .catch((err: unknown) => {
+        console.error(err);
+        setSessionList([]);
+      })
+      .finally(() => setSessionListLoading(false));
+  };
+
+  const openImportModal = () => {
+    setImportModalOpen(true);
+    refreshSessionList();
+  };
+
+  const closeImportModal = () => {
+    setImportModalOpen(false);
+  };
+
+  const handleSessionPick = (id: number) => {
+    closeImportModal();
+    navigate(`/draft/${id}`);
+  };
+
+  const handleSessionDelete = (id: number) => {
+    if (!confirm("Delete this session?")) return;
+    apiDeleteAuth<{ status: string; sessionId: number }>(`/api/draft/sessions/${id}`)
+      .then(() => {
+        // 현재 활성 세션 삭제 시 홈으로 리다이렉트
+        if (isLoadedMode && sessionId === id) {
+          closeImportModal();
+          navigate("/", { replace: true });
+          return;
+        }
+        refreshSessionList();
       })
       .catch((err: unknown) => {
         console.error(err);
-        setError(err instanceof Error ? err.message : "Failed to save draft pick");
+        alert("Delete failed");
       });
   };
+
+  if (!bootstrapped || !config) {
+    return (
+      <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-sm text-white/70">
+        Loading draft...
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-6">
-      <FadeIn>
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div>
-            <div className="text-sm font-black text-white/70">PPA-DUN</div>
-            <h1 className="mt-1 text-3xl font-black text-white">Draft Room</h1>
-            <p className="mt-2 text-sm text-white/60">
-              {String(config.leagueType ?? "standard").toUpperCase()} - ${config.budget} Budget - {rosterSlots} Players
-            </p>
-          </div>
-
-          <div className="rounded-2xl border border-white/10 bg-white/5 px-5 py-4">
-            <div className="text-xs font-extrabold text-white/60">Remaining Budget</div>
-            <div className="mt-1 text-2xl font-black text-emerald-400">${remainingBudget}</div>
-          </div>
-        </div>
-      </FadeIn>
+      <DraftHeaderBar
+        sessionName={sessionName}
+        config={config}
+        hasDraftConfig={hasDraftConfig}
+        isLoadedMode={isLoadedMode}
+        rosterSize={rosterSize}
+        remainingBudget={remainingBudget}
+        authed={authed}
+        canUndoPicks={canUndoPicks}
+        canRedoPicks={canRedoPicks}
+        onUndo={undoPicks}
+        onRedo={redoPicks}
+        onDiscard={handleDiscardDraft}
+        onNew={handleNewDraft}
+        onSave={openSaveModal}
+        onImport={openImportModal}
+        onStartDraft={openStartDraft}
+      />
 
       <FadeIn delayMs={60}>
         <div ref={draftRoomTopRef}>
-          {authed ? (
+          {authed && hasDraftConfig ? (
             <DraftRoomBoard
               teams={teams}
               slotTemplate={slotTemplate}
               picks={picks}
               playersById={playersById}
               currentRound={currentRound}
-              totalRounds={rosterSlots}
+              totalRounds={rosterSize}
               authed={authed}
+              view={boardView}
+              onViewChange={setBoardView}
               onRemovePick={handleRemovePick}
+              onSlotReassign={handleSlotReassign}
             />
           ) : (
-            <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
-              <div className="text-lg font-black text-white">Guest View</div>
+            <section className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
+              <div className="text-2xl font-black text-white">
+                Ready to draft?
+              </div>
               <div className="mt-2 text-sm text-white/60">
-                Sign in to use the live draft room board and Add / Taken actions.
+                {authed
+                  ? "Use the Start Draft button above to set up your league."
+                  : "Sign in and use the Start Draft button above to set up your league."}
               </div>
             </section>
           )}
         </div>
       </FadeIn>
 
-      <FadeIn delayMs={100} className="relative z-40">
-        <section className="rounded-3xl border border-white/10 bg-white/5 p-5">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-            <div className="w-full lg:max-w-md">
-              <div className="text-xs font-extrabold text-white/70">Search</div>
-              <input
-                value={query}
-                onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search player name..."
-                className="mt-2 w-full rounded-2xl border border-white/10 bg-black/40 px-4 py-3 text-sm font-semibold text-white outline-none placeholder:text-white/40 focus:border-white/25"
-              />
-            </div>
+      <PlayerSearchToolbar
+        query={query}
+        onChangeQuery={(next) => {
+          setQuery(next);
+          setPage(1);
+        }}
+        sort={sort}
+        sortOptions={sortOptions}
+        onChangeSort={(next) => {
+          setSort(next);
+          setPage(1);
+        }}
+        positionFilters={positionFilters}
+        position={position}
+        onChangePosition={(next) => {
+          setPosition(next);
+          setPage(1);
+        }}
+        hasDraftConfig={hasDraftConfig}
+        remainingBudget={remainingBudget}
+        onOpenCustomizeStats={() => setCustomizeStatsOpen(true)}
+      />
 
-            <div className="w-full lg:w-72">
-              <Dropdown<DraftSort>
-                label="Sort"
-                value={sort}
-                options={sortOptions}
-                onChange={setSort}
-              />
-            </div>
-          </div>
+      <ComparisonPanel
+        selectedA={selectedA}
+        selectedB={selectedB}
+        authed={authed}
+        onClearA={clearCompareA}
+        onClearB={clearCompareB}
+        onClearAll={clearCompare}
+        onOpenComparison={() => setComparisonOpen(true)}
+      />
 
-          <div className="mt-4 flex flex-wrap items-center gap-2">
-            {positionFilters.map((filterValue) => {
-              const active = position === filterValue;
-              return (
-                <button
-                  key={filterValue}
-                  onClick={() => setPosition(filterValue)}
-                  className={[
-                    "rounded-full px-3 py-1 text-xs font-extrabold transition",
-                    active
-                      ? "bg-white text-black"
-                      : "border border-white/10 bg-white/5 text-white/80 hover:bg-white/10",
-                  ].join(" ")}
-                >
-                  {filterValue}
-                </button>
-              );
-            })}
-
-            <div className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-300">
-              Remaining Budget: ${remainingBudget}
-            </div>
-          </div>
-        </section>
-      </FadeIn>
-
-      <FadeIn delayMs={120}>
-        <section className="rounded-2xl border border-fuchsia-500/55 bg-[#1b1228] p-4 shadow-[0_0_22px_rgba(168,85,247,0.22)]">
-          <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-            <div className="flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center">
-              <div className="rounded-xl bg-fuchsia-500/15 px-4 py-3 ring-1 ring-fuchsia-300/40 lg:min-w-[170px]">
-                <div className="text-sm font-black text-fuchsia-200">Compare</div>
-                <div className="mt-0.5 text-[11px] font-bold text-white/65">Select 2 players</div>
-              </div>
-
-              <div className="flex min-w-0 flex-1 flex-col items-stretch gap-2 sm:flex-row sm:items-center sm:justify-center">
-                <div className="min-w-0 w-full rounded-xl border border-emerald-400/50 bg-emerald-500/12 px-3 py-2 shadow-[0_0_16px_rgba(16,185,129,0.18)] sm:w-[300px]">
-                  {selectedA ? (
-                    <>
-                      <div className="flex items-center justify-between gap-2 text-xs text-white/80">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="rounded bg-emerald-500/25 px-1.5 py-0.5 font-black text-emerald-100">A</span>
-                          <span className="truncate font-black text-white">{selectedA.name}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={clearCompareA}
-                          className="grid h-5 w-5 place-items-center rounded-full border border-white/20 bg-black/20 text-[10px] font-black text-white/80 transition hover:bg-white/15"
-                          aria-label="Remove player A from compare"
-                          title="Remove player A"
-                        >
-                          X
-                        </button>
-                      </div>
-                      <div className="mt-1 text-[11px] font-semibold text-white/70">
-                        {selectedA.positions.join("/")} - {selectedA.team} - ${selectedA.recommendedBid}
-                      </div>
-                      <div className="mt-1 text-[10px] text-white/55">
-                        AVG {formatAvg(selectedA.avg)} | HR {selectedA.hr ?? "-"} | RBI {selectedA.rbi ?? "-"} | SB {selectedA.sb ?? "-"}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="text-xs font-bold text-white/55">Select player A</div>
-                  )}
-                </div>
-
-                <div className="text-center text-xs font-black text-fuchsia-200 sm:px-1">VS</div>
-
-                <div className="min-w-0 w-full rounded-xl border border-emerald-400/50 bg-emerald-500/12 px-3 py-2 shadow-[0_0_16px_rgba(16,185,129,0.18)] sm:w-[300px]">
-                  {selectedB ? (
-                    <>
-                      <div className="flex items-center justify-between gap-2 text-xs text-white/80">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <span className="rounded bg-emerald-500/25 px-1.5 py-0.5 font-black text-emerald-100">B</span>
-                          <span className="truncate font-black text-white">{selectedB.name}</span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={clearCompareB}
-                          className="grid h-5 w-5 place-items-center rounded-full border border-white/20 bg-black/20 text-[10px] font-black text-white/80 transition hover:bg-white/15"
-                          aria-label="Remove player B from compare"
-                          title="Remove player B"
-                        >
-                          X
-                        </button>
-                      </div>
-                      <div className="mt-1 text-[11px] font-semibold text-white/70">
-                        {selectedB.positions.join("/")} - {selectedB.team} - ${selectedB.recommendedBid}
-                      </div>
-                      <div className="mt-1 text-[10px] text-white/55">
-                        AVG {formatAvg(selectedB.avg)} | HR {selectedB.hr ?? "-"} | RBI {selectedB.rbi ?? "-"} | SB {selectedB.sb ?? "-"}
-                      </div>
-                    </>
-                  ) : (
-                    <div className="text-xs font-bold text-white/55">Select player B</div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-2 self-end lg:self-auto">
-              <button
-                type="button"
-                onClick={clearCompare}
-                disabled={!selectedA && !selectedB}
-                className="rounded-xl border border-white/15 bg-black/25 px-4 py-2 text-xs font-black text-white/80 transition hover:bg-white/10 disabled:opacity-40"
-              >
-                Clear
-              </button>
-              <button
-                type="button"
-                onClick={() => setComparisonOpen(true)}
-                disabled={!selectedA || !selectedB || !authed}
-                className="rounded-xl bg-fuchsia-600 px-4 py-2 text-xs font-black text-white transition hover:bg-fuchsia-500 disabled:opacity-40"
-                title={!authed ? "Sign in required" : "Open player comparison"}
-              >
-                Compare
-              </button>
-            </div>
-          </div>
-        </section>
-      </FadeIn>
-
-      <FadeIn delayMs={140}>
-        <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5">
-          <div className="grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] bg-black/40 px-4 py-3 text-xs font-extrabold text-white/60">
-            <div>#</div>
-            <div>Player</div>
-            <div>Pos</div>
-            <div>Draft Cost</div>
-            <div>Team</div>
-            <div>AVG</div>
-            <div>HR</div>
-            <div>RBI</div>
-            <div>SB</div>
-            <div>PPA-DUN Value</div>
-            <div>Action</div>
-            <div>Compare</div>
-          </div>
-
-          <div className="bg-black/20">
-            {loading && (
-              <div className="p-4">
-                <Skeleton className="h-24" />
-              </div>
-            )}
-
-            {!loading && error && <div className="p-4 text-sm text-red-200">Failed to load players: {error}</div>}
-
-            {!loading && !error && players.length === 0 && (
-              <div className="p-4 text-sm text-white/70">No results. Try another search or filter.</div>
-            )}
-
-            {!loading &&
-              !error &&
-              players.map((player, idx) => {
-                const status = getPlayerDraftStatus(player.id, picks, teams);
-                const compareAActive = compareAId === player.id;
-                const compareBActive = compareBId === player.id;
-                const compareRole = compareAActive ? "A" : compareBActive ? "B" : null;
-                const compareActive = Boolean(compareRole);
-
-                return (
-                  <div
-                    key={player.id}
-                    className={[
-                      "grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] items-center px-4 py-3 text-sm text-white/85 transition",
-                      compareActive
-                        ? "relative z-[1] my-1 rounded-xl border border-emerald-400/75 bg-emerald-500/10 shadow-[0_0_18px_rgba(16,185,129,0.35)]"
-                        : "hover:bg-white/5",
-                    ].join(" ")}
-                  >
-                    <div className="text-white/45">{(page - 1) * PAGE_SIZE + idx + 1}</div>
-
-                    <div>
-                      <button
-                        type="button"
-                        onClick={() => openPlayerInfo(player.id)}
-                        className="rounded-md border border-transparent px-2 py-1 -mx-2 -my-1 font-semibold text-white transition hover:border-white/35 hover:bg-white/5 hover:text-amber-200 focus-visible:border-white/45 focus-visible:bg-white/10 focus-visible:outline-none"
-                      >
-                        {player.name}
-                      </button>
-                    </div>
-
-                    <div>
-                      <span className="rounded-lg bg-white/10 px-2 py-1 text-[11px] font-extrabold text-white/80">
-                        {player.positions[0]}
-                      </span>
-                    </div>
-
-                    <div className={draftCostClass(authed)}>${player.recommendedBid}</div>
-
-                    <div>
-                      <span
-                        className={[
-                          "inline-flex items-center rounded-lg border px-2 py-1 text-[11px] font-extrabold",
-                          mlbTeamBadgeClass(player.team),
-                        ].join(" ")}
-                      >
-                        {player.team}
-                      </span>
-                    </div>
-
-                    <div className="text-white/70">{formatAvg(player.avg)}</div>
-                    <div className="font-semibold text-amber-300">{player.hr ?? "-"}</div>
-                    <div className="text-white/70">{player.rbi ?? "-"}</div>
-                    <div className="font-semibold text-amber-300">{player.sb ?? "-"}</div>
-
-                    <div className={`font-black ${valueClass(player.ppaValue, authed)}`}>
-                      {player.ppaValue.toFixed(1)}
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      {status.kind === "mine" ? (
-                        <div className="rounded-xl bg-sky-500/15 px-3 py-2 text-xs font-black text-sky-200 ring-1 ring-sky-400/20">
-                          {status.label}
-                        </div>
-                      ) : status.kind === "taken" ? (
-                        <div className="rounded-xl bg-rose-500/15 px-3 py-2 text-xs font-black text-rose-200 ring-1 ring-rose-400/20">
-                          {status.label}
-                        </div>
-                      ) : authed ? (
-                        <>
-                          <button
-                            onClick={() => openAddModal(player)}
-                            className="rounded-xl bg-emerald-500/15 px-3 py-2 text-xs font-black text-emerald-200 ring-1 ring-emerald-400/20 transition hover:bg-emerald-500/25"
-                          >
-                            Add
-                          </button>
-                          <button
-                            onClick={() => openTakenModal(player)}
-                            className="rounded-xl bg-rose-500/15 px-3 py-2 text-xs font-black text-rose-200 ring-1 ring-rose-400/20 transition hover:bg-rose-500/25"
-                          >
-                            Taken
-                          </button>
-                        </>
-                      ) : (
-                        <div className="rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black text-white/40 blur-[1px]">
-                          Sign in required
-                        </div>
-                      )}
-                    </div>
-
-                    <div className="flex items-center justify-end">
-                      <button
-                        type="button"
-                        disabled={!authed}
-                        onClick={() => handleCompareToggle(player.id)}
-                        className={[
-                          "relative h-6 w-14 rounded-full border transition",
-                          compareActive
-                            ? "border-emerald-300/70 bg-emerald-500/70 shadow-[0_0_12px_rgba(16,185,129,0.5)]"
-                            : "border-white/10 bg-white/5 hover:bg-white/10",
-                          !authed ? "opacity-40" : "",
-                        ].join(" ")}
-                        title={!authed ? "Sign in required" : compareRole ? `Selected ${compareRole}` : "Select for compare"}
-                      >
-                        <span
-                          className={[
-                            "absolute left-1 top-1 h-4 w-4 rounded-full bg-white transition-transform duration-200",
-                            compareActive ? "translate-x-8" : "translate-x-0",
-                          ].join(" ")}
-                        />
-                        {compareRole && (
-                          <span className="absolute left-2 top-1/2 -translate-y-1/2 text-[10px] font-black text-emerald-950">
-                            {compareRole}
-                          </span>
-                        )}
-                      </button>
-                    </div>
-                  </div>
-                );
-              })}
-          </div>
-
-          <div className="border-t border-white/10 px-4 py-3 text-xs text-white/45">
-            Players and draft picks are loaded from backend APIs.
-          </div>
-        </section>
-
-        <Pagination page={page} totalPages={totalPages} onChange={setPage} />
-      </FadeIn>
+      <PlayerListTable
+        players={players}
+        picks={picks}
+        teams={teams}
+        page={page}
+        pageSize={PAGE_SIZE}
+        totalPages={totalPages}
+        onChangePage={setPage}
+        statColumnLabels={statColumnLabels}
+        batterCols={batterCols}
+        pitcherCols={pitcherCols}
+        loading={loading}
+        error={error}
+        authed={authed}
+        hasDraftConfig={hasDraftConfig}
+        notes={notes}
+        affectedPlayerIds={affectedPlayerIds}
+        compareAId={compareAId}
+        compareBId={compareBId}
+        onAddPick={handleAddClick}
+        onTakenPick={openTakenModal}
+        onOpenNote={openNoteModal}
+        onOpenPlayerInfo={openPlayerInfo}
+        onToggleCompare={handleCompareToggle}
+      />
 
       {addTarget && (
         <AddBidModal
@@ -847,15 +1159,16 @@ export default function DraftPage() {
 
       {takenTarget && (
         <TakenBidModal
-          key={`taken-${takenTarget.id}`}
+          key={`taken-${takenTarget.id}-${boardView}`}
           open={true}
-      player={takenTarget}
-      teams={teams}
-      remainingBudgetByTeam={remainingBudgetByTeam}
-      onClose={closeTakenModal}
-      onConfirm={handleTakenFinish}
-    />
-  )}
+          player={takenTarget}
+          teams={teams}
+          remainingBudgetByTeam={remainingBudgetByTeam}
+          kind={boardView}
+          onClose={closeTakenModal}
+          onConfirm={handleTakenFinish}
+        />
+      )}
 
       <PlayerComparisonModal
         open={comparisonOpen && Boolean(selectedA) && Boolean(selectedB)}
@@ -867,9 +1180,81 @@ export default function DraftPage() {
       <PlayerInfoModal
         open={profilePlayerId !== null}
         playerId={profilePlayerId}
+        playerType={profilePlayerType}
         onClose={closePlayerInfo}
       />
 
+      {customizeStatsOpen && (
+        <CustomizeStatsModal
+          onClose={() => setCustomizeStatsOpen(false)}
+          batterCols={batterCols}
+          pitcherCols={pitcherCols}
+          onSave={(group, cols) => {
+            if (group === "batter") setBatterCols(cols);
+            else setPitcherCols(cols);
+          }}
+        />
+      )}
+
+      {noteTarget && (
+        <PlayerNotePopover
+          open={true}
+          playerName={noteTarget.name}
+          initialNote={notes[noteTarget.id] ?? ""}
+          saving={noteSaving}
+          onSave={handleNoteSave}
+          onClose={closeNoteModal}
+        />
+      )}
+
+      {saveModalOpen && (
+        <SaveSessionModal
+          isLoadedMode={isLoadedMode}
+          nameInput={saveNameInput}
+          onChangeName={(next) => {
+            setSaveNameInput(next);
+            if (saveError) setSaveError(null);
+          }}
+          error={saveError}
+          saving={saving}
+          onCancel={closeSaveModal}
+          onConfirm={handleSaveConfirm}
+        />
+      )}
+
+      {importModalOpen && (
+        <ImportSessionsModal
+          sessions={sessionList}
+          loading={sessionListLoading}
+          onClose={closeImportModal}
+          onPick={handleSessionPick}
+          onDelete={handleSessionDelete}
+        />
+      )}
+
+      {newConfirmOpen && (
+        <NewDraftConfirmModal
+          onSaveFirst={handleNewConfirmSaveFirst}
+          onDiscardCurrent={handleNewConfirmDiscard}
+          onCancel={handleNewConfirmCancel}
+        />
+      )}
+
+      <Modal
+        open={setupModalOpen}
+        title="Start Your Draft"
+        onClose={() => setSetupModalOpen(false)}
+      >
+        <DraftSetupCard embedded onSubmit={handleSetupSubmit} />
+      </Modal>
+
+      <LoginPromptModal
+        open={loginModalOpen}
+        onClose={() => setLoginModalOpen(false)}
+        onAuthSuccess={() => setSetupModalOpen(true)}
+      />
+
+      <Toast toasts={toasts} onDismiss={dismissToast} />
     </div>
   );
 }

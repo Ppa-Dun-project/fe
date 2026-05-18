@@ -1,22 +1,26 @@
 // 내 팀 페이지 (로그인 필수)
-// - 백엔드에서 드래프트한 선수 목록 + 예산 정보를 받아옴
+// - 드래프트 세션 단위로 동작: GET /api/my-team/players?sessionId=<id>
+// - 진입 시 GET /api/draft/sessions 로 사용자 세션 목록을 조회 →
+//   URL ?sessionId 가 있고 소유 세션이면 그 값, 없으면 가장 최근 세션을 default 로 사용
 // - 필터/정렬/검색은 전부 프론트에서 처리 (백엔드는 원시 데이터만 제공)
 import { useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import FadeIn from "../components/ui/FadeIn";
 import Skeleton from "../components/ui/Skeleton";
 import Dropdown from "../components/ui/Dropdown";
 
 import type { MyTeamPlayer, MyTeamPosFilter, MyTeamSort } from "../types/myteam";
+import type { SessionSummary } from "../types/draft";
 import {
   filterMyTeam,
   formatAvg,
   sortMyTeam,
-  teamBadgeClass,
-  valueScoreClass,
 } from "../features/myteam/utils";
-import { apiGet } from "../lib/api";
+import { mlbTeamBadgeClass } from "../features/draft/utils";
+import { getActiveDraftSessionId } from "../features/draft/draftHelpers";
+import { formatPpa, ppaValueClass } from "../utils/playerValue";
+import { apiGetAuth } from "../lib/api";
 import PlayerInfoModal from "../features/players/components/PlayerInfoModal";
-import { DRAFT_ROOM_ID } from "../lib/runtimeConfig";
 
 // 백엔드 GET /api/my-team/players 응답 타입
 type MyTeamPlayersResponse = {
@@ -24,6 +28,11 @@ type MyTeamPlayersResponse = {
   totalBudget: number;
   spentBudget: number;
   remainingBudget: number;
+};
+
+// 백엔드 GET /api/draft/sessions 응답 타입
+type SessionsListResponse = {
+  items: SessionSummary[];
 };
 
 // 예산 정보를 하나의 객체로 묶음 (useState 3번 → 1번)
@@ -41,19 +50,39 @@ const POSITION_FILTERS: MyTeamPosFilter[] = [
 const SORT_OPTIONS: { value: MyTeamSort; label: string }[] = [
   { value: "score_desc", label: "By Score" },
   { value: "cost_desc", label: "By Value $" },
-  { value: "avg_desc", label: "By AVG" },
-  { value: "hr_desc", label: "By HR" },
-  { value: "rbi_desc", label: "By RBI" },
-  { value: "sb_desc", label: "By SB" },
+  { value: "avg_desc", label: "By AVG/ERA" },
+  { value: "hr_desc", label: "By HR/SO" },
+  { value: "rbi_desc", label: "By RBI/W" },
+  { value: "sb_desc", label: "By SB/SV" },
 ];
 
 // 테이블 컬럼 그리드 정의 (헤더와 각 행에서 공유)
 const TABLE_GRID_COLS =
   "grid-cols-[1.8fr_.6fr_.6fr_.7fr_.7fr_.7fr_.7fr_.7fr_.9fr]";
 
+function isPitcher(player: MyTeamPlayer) {
+  return player.playerType === "pitcher";
+}
+
+function formatNumber(value: number | null | undefined, digits: number) {
+  if (value === null || value === undefined) return "-";
+  return value.toFixed(digits);
+}
+
 export default function MyTeamPage() {
-  // 로딩/에러 상태 (초기값 loading=true: 마운트 직후 API 호출 중)
-  const [loading, setLoading] = useState(true);
+  // URL ?sessionId — 소스 오브 트루스. 새로고침/공유 후에도 같은 세션을 보여주기 위함.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const urlSessionIdRaw = searchParams.get("sessionId");
+
+  // 세션 목록 로드 상태 (sessions === null = 아직 미조회)
+  const [sessions, setSessions] = useState<SessionSummary[] | null>(null);
+  const [sessionsError, setSessionsError] = useState<string | null>(null);
+
+  // 현재 보고 있는 세션 ID (sessions 로드 완료 후 결정됨)
+  const [sessionId, setSessionId] = useState<number | null>(null);
+
+  // 선수 데이터 로딩/에러 상태
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // 백엔드에서 받아온 선수 목록 + 예산 정보
@@ -67,14 +96,79 @@ export default function MyTeamPage() {
 
   // 선수 정보 모달 상태 (선택된 선수 ID)
   const [profilePlayerId, setProfilePlayerId] = useState<number | null>(null);
+  const [profilePlayerType, setProfilePlayerType] = useState<"batter" | "pitcher">("batter");
 
-  // 마운트 시 한 번만 백엔드에서 내 팀 데이터 로드
+  // ── 1단계: 세션 목록 조회 + sessionId 결정 ──
+  // 우선순위:
+  //   1) activeDraftSessionId (sessionStorage) — 사용자가 지금 Draft 페이지에서
+  //      보고 있는 세션. "My Team 은 현재 드래프트와 연동" 시맨틱.
+  //   2) URL ?sessionId — 직접 링크 / 북마크 케이스 (소유 세션일 때만).
+  //   3) 그 외 → "활성 드래프트 없음" 빈 상태 (자동으로 옛 세션 불러오지 않음).
   useEffect(() => {
     const controller = new AbortController();
 
-    apiGet<MyTeamPlayersResponse>(
+    apiGetAuth<SessionsListResponse>(
+      "/api/draft/sessions",
+      undefined,
+      controller.signal
+    )
+      .then((data) => {
+        if (controller.signal.aborted) return;
+        const items = data.items ?? [];
+        setSessions(items);
+
+        if (items.length === 0) {
+          setSessionId(null);
+          return;
+        }
+
+        // activeDraftSessionId 가 유효한 소유 세션이면 최우선.
+        const activeId = getActiveDraftSessionId();
+        if (activeId !== null && items.some((s) => s.id === activeId)) {
+          setSessionId(activeId);
+          const next = new URLSearchParams(searchParams);
+          next.set("sessionId", String(activeId));
+          setSearchParams(next, { replace: true });
+          return;
+        }
+
+        // 활성 드래프트가 없으면 URL 만 신뢰. 옛 stale URL 이라도 그 값이
+        // 소유 세션이면 그대로 두고 (북마크/공유 시나리오), 아니면 빈 상태.
+        const urlIdNum = urlSessionIdRaw ? Number(urlSessionIdRaw) : NaN;
+        const urlIsValid =
+          Number.isFinite(urlIdNum) && items.some((s) => s.id === urlIdNum);
+        if (urlIsValid) {
+          setSessionId(urlIdNum);
+        } else {
+          setSessionId(null);
+        }
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setSessions([]);
+        setSessionsError(
+          err instanceof Error ? err.message : "Failed to load draft sessions"
+        );
+      });
+
+    return () => controller.abort();
+    // 마운트 시 한 번만 — URL/searchParams 가 바뀌어도 재조회하지 않음
+    // (URL 변경은 setSearchParams 로 우리가 직접 만든 결과)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // ── 2단계: sessionId 가 결정되면 해당 세션의 My Team 데이터 로드 ──
+  useEffect(() => {
+    if (sessionId === null) return;
+
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+
+    apiGetAuth<MyTeamPlayersResponse>(
       "/api/my-team/players",
-      { userId: DRAFT_ROOM_ID },  // 백엔드 가이드: roomId → userId로 통일
+      { sessionId },
       controller.signal
     )
       .then((data) => {
@@ -97,7 +191,22 @@ export default function MyTeamPage() {
       });
 
     return () => controller.abort();
-  }, []);
+  }, [sessionId]);
+
+  // 현재 보고 있는 세션의 메타 정보 (제목 옆에 이름 표시용)
+  const activeSession = useMemo(
+    () => sessions?.find((s) => s.id === sessionId) ?? null,
+    [sessions, sessionId]
+  );
+
+  // 세션 0개 빈 상태 (sessions 로드 완료 + length === 0)
+  const noSessions = sessions !== null && sessions.length === 0;
+  // 세션은 있지만 지금 보고 있을 활성 드래프트가 없음 (Draft 페이지에서 New/Discard
+  // 후, 또는 처음 들어왔는데 URL/active 세션 없음). 옛 세션을 자동으로
+  // 끌어오지 않고 명시적 안내 — "마이팀 = 현재 드래프트" 시맨틱 유지.
+  const noActiveDraft =
+    sessions !== null && sessions.length > 0 && sessionId === null;
+  const sessionsLoading = sessions === null && sessionsError === null;
 
   // 클라이언트 측 필터링 + 정렬 (백엔드 재호출 없이 메모리에서 계산)
   const visiblePlayers = useMemo(
@@ -113,6 +222,11 @@ export default function MyTeamPage() {
           <div>
             <div className="text-sm font-black text-white/70">PPA-DUN</div>
             <h1 className="mt-1 text-3xl font-black text-white">My Team</h1>
+            {activeSession && (
+              <div className="mt-1 text-sm font-semibold text-white/60">
+                Session: <span className="text-white/85">{activeSession.name}</span>
+              </div>
+            )}
           </div>
 
           <div className="flex items-center gap-3 rounded-2xl border border-white/10 bg-white/5 px-6 py-4">
@@ -125,7 +239,53 @@ export default function MyTeamPage() {
         </div>
       </FadeIn>
 
+      {/* 세션 0개일 때: 안내 카드만 보여주고 본문 테이블은 렌더하지 않음 */}
+      {noSessions && (
+        <FadeIn delayMs={60}>
+          <section className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
+            <h2 className="text-lg font-black text-white">No draft sessions yet</h2>
+            <p className="mt-2 text-sm font-semibold text-white/70">
+              Create a draft session to see your team here.
+            </p>
+            <Link
+              to="/draft"
+              className="mt-4 inline-block rounded-2xl bg-emerald-500 px-5 py-2 text-sm font-black text-black transition hover:bg-emerald-400"
+            >
+              Go to Draft
+            </Link>
+          </section>
+        </FadeIn>
+      )}
+
+      {/* 세션은 있지만 현재 활성 드래프트가 없음 (New/Discard 직후 등) */}
+      {noActiveDraft && (
+        <FadeIn delayMs={60}>
+          <section className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
+            <h2 className="text-lg font-black text-white">No active draft</h2>
+            <p className="mt-2 text-sm font-semibold text-white/70">
+              Start or load a draft session, and your team will appear here.
+            </p>
+            <Link
+              to="/draft"
+              className="mt-4 inline-block rounded-2xl bg-emerald-500 px-5 py-2 text-sm font-black text-black transition hover:bg-emerald-400"
+            >
+              Go to Draft
+            </Link>
+          </section>
+        </FadeIn>
+      )}
+
+      {/* 세션 목록 조회 자체가 실패 */}
+      {sessionsError && (
+        <FadeIn delayMs={60}>
+          <section className="rounded-3xl border border-red-500/30 bg-red-500/5 p-6 text-sm text-red-200">
+            Failed to load draft sessions: {sessionsError}
+          </section>
+        </FadeIn>
+      )}
+
       {/* 본문: 검색/정렬/포지션 필터 + 선수 목록 테이블 */}
+      {!noSessions && !noActiveDraft && !sessionsError && (
       <FadeIn delayMs={60} className="relative z-40">
         <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
           {/* 검색창 + 정렬 드롭다운 */}
@@ -175,30 +335,30 @@ export default function MyTeamPage() {
               <div>Pos</div>
               <div>$</div>
               <div>Team</div>
-              <div>AVG</div>
-              <div>HR</div>
-              <div>RBI</div>
-              <div>SB</div>
+              <div>AVG/ERA</div>
+              <div>HR/SO</div>
+              <div>RBI/W</div>
+              <div>SB/SV</div>
               <div className="text-right">PPA-DUN Value</div>
             </div>
 
             {/* 테이블 본문: 로딩/에러/빈 상태/정상 4가지 분기 */}
             <div className="bg-black/20">
-              {loading && (
+              {(sessionsLoading || loading) && (
                 <div className="p-4">
                   <Skeleton className="h-24" />
                 </div>
               )}
 
-              {!loading && error && (
+              {!sessionsLoading && !loading && error && (
                 <div className="p-4 text-sm text-red-200">Failed to load my team: {error}</div>
               )}
 
-              {!loading && !error && visiblePlayers.length === 0 && (
+              {!sessionsLoading && !loading && !error && visiblePlayers.length === 0 && (
                 <div className="p-4 text-sm text-white/70">No players found.</div>
               )}
 
-              {!loading && !error && visiblePlayers.map((player) => (
+              {!sessionsLoading && !loading && !error && visiblePlayers.map((player) => (
                 <div
                   key={player.id}
                   className={`grid w-full ${TABLE_GRID_COLS} items-center px-4 py-3 text-left text-sm text-white/85 transition hover:bg-white/5`}
@@ -207,7 +367,10 @@ export default function MyTeamPage() {
                   <div>
                     <button
                       type="button"
-                      onClick={() => setProfilePlayerId(Number(player.id))}
+                      onClick={() => {
+                        setProfilePlayerId(Number(player.id));
+                        setProfilePlayerType(player.playerType);
+                      }}
                       className="rounded-md border border-transparent px-2 py-1 -mx-2 -my-1 font-semibold text-white transition hover:border-white/35 hover:bg-white/5 hover:text-amber-200 focus-visible:border-white/45 focus-visible:bg-white/10 focus-visible:outline-none"
                     >
                       {player.name}
@@ -226,20 +389,28 @@ export default function MyTeamPage() {
 
                   {/* MLB 팀 배지 (팀별 색상) */}
                   <div>
-                    <span className={`inline-flex items-center rounded-lg border px-2 py-1 text-xs font-extrabold ${teamBadgeClass(player.team)}`}>
+                    <span className={`inline-flex items-center rounded-lg border px-2 py-1 text-xs font-extrabold ${mlbTeamBadgeClass(player.team)}`}>
                       {player.team}
                     </span>
                   </div>
 
                   {/* 스탯 */}
-                  <div className="text-white/70">{formatAvg(player.avg)}</div>
-                  <div className="font-semibold text-amber-300">{player.hr ?? "-"}</div>
-                  <div className="text-white/70">{player.rbi ?? "-"}</div>
-                  <div className="font-semibold text-amber-300">{player.sb ?? "-"}</div>
+                  <div className="text-white/70">
+                    {isPitcher(player) ? formatNumber(player.era, 2) : formatAvg(player.avg)}
+                  </div>
+                  <div className="font-semibold text-amber-300">
+                    {isPitcher(player) ? player.so ?? "-" : player.hr ?? "-"}
+                  </div>
+                  <div className="text-white/70">
+                    {isPitcher(player) ? player.w ?? "-" : player.rbi ?? "-"}
+                  </div>
+                  <div className="font-semibold text-amber-300">
+                    {isPitcher(player) ? player.sv ?? "-" : player.sb ?? "-"}
+                  </div>
 
                   {/* PPA-DUN 가치 점수 (10점 이상이면 발광 효과) */}
-                  <div className={`text-right text-sm font-black ${valueScoreClass(player.ppaValue)}`}>
-                    {player.ppaValue.toFixed(1)}
+                  <div className={`text-right text-sm font-black ${ppaValueClass(player.ppaValue)}`}>
+                    {formatPpa(player.ppaValue)}
                   </div>
                 </div>
               ))}
@@ -247,11 +418,13 @@ export default function MyTeamPage() {
           </div>
         </section>
       </FadeIn>
+      )}
 
       {/* 선수 정보 모달 */}
       <PlayerInfoModal
         open={profilePlayerId !== null}
         playerId={profilePlayerId}
+        playerType={profilePlayerType}
         onClose={() => setProfilePlayerId(null)}
       />
     </div>
