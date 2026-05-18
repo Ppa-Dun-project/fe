@@ -202,13 +202,11 @@ export type PlayerNote = {
  * - _desc: descending (highest first).
  * - _asc: ascending.
  */
-export type DraftSort =
-  | "score_desc"
-  | "score_asc"
-  | "avg_desc"
-  | "hr_desc"
-  | "rbi_desc"
-  | "sb_desc";
+// Sort options for the player list.
+//   - "score_desc" / "score_asc" — sort by PPA-DUN value (the always-available default).
+//   - `stat:${key}` — sort by one of the currently selected stat columns (dynamic).
+//     The stat key matches a StatDef.key; lowerIsBetter (ERA / WHIP / …) is honored.
+export type DraftSort = "score_desc" | "score_asc" | `stat:${string}`;
 
 /**
  * DraftPositionFilter: position filter options.

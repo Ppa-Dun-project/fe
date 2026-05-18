@@ -14,6 +14,7 @@ import type {
   SessionSummary,
 } from "../../types/draft";
 import { DEFAULT_ROSTER_SLOTS, formatAvg, sumRosterSlots } from "./utils";
+import { getStatDef } from "./statColumns";
 
 // ── Constants ─────────────────────────────────────────────────────────
 
@@ -33,21 +34,23 @@ export const DEFAULT_POSITION_FILTERS: DraftPositionFilter[] = [
   "C", "1B", "2B", "3B", "SS", "OF", "UTIL", "SP", "RP",
 ];
 
-export const BATTER_SORT_OPTIONS: { value: DraftSort; label: string }[] = [
-  { value: "score_desc", label: "By Score" },
-  { value: "avg_desc",   label: "By AVG" },
-  { value: "hr_desc",    label: "By HR" },
-  { value: "rbi_desc",   label: "By RBI" },
-  { value: "sb_desc",    label: "By SB" },
-];
-
-export const PITCHER_SORT_OPTIONS: { value: DraftSort; label: string }[] = [
-  { value: "score_desc", label: "By Score" },
-  { value: "avg_desc",   label: "By ERA" },
-  { value: "hr_desc",    label: "By SO" },
-  { value: "rbi_desc",   label: "By W" },
-  { value: "sb_desc",    label: "By SV" },
-];
+// Build the Sort dropdown options dynamically — "By Score" always first, then one
+// option per currently-selected stat slot (null slots skipped). Pure function so
+// it can be memoized in the page component.
+export function buildSortOptions(
+  statKeys: readonly (string | null)[],
+): { value: DraftSort; label: string }[] {
+  const opts: { value: DraftSort; label: string }[] = [
+    { value: "score_desc", label: "By Score" },
+  ];
+  for (const key of statKeys) {
+    if (key === null) continue;
+    const def = getStatDef(key);
+    if (!def) continue;
+    opts.push({ value: `stat:${key}` as DraftSort, label: `By ${def.label}` });
+  }
+  return opts;
+}
 
 // ── Inline API response & sessionStorage payload types ────────────────
 

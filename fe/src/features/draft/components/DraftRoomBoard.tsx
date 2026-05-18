@@ -254,6 +254,24 @@ export default function DraftRoomBoard({
                         ? "ring-2 ring-rose-400/60"
                         : "";
 
+                      // While a drag is in progress, paint every slot with its eligibility
+                      // (green = droppable, red = not) so the user can see all valid targets
+                      // at a glance instead of hovering one at a time. The source slot is dimmed.
+                      const dragMode = draggingFrom !== null;
+                      const isSource =
+                        dragMode &&
+                        draggingFrom?.teamId === team.id &&
+                        draggingFrom?.index === slotIndex;
+                      const dragEligible =
+                        dragMode && !isSource ? isHoverEligible(team.id, slotIndex) : null;
+                      const dragTintClass =
+                        dragEligible === true
+                          ? "border-emerald-400/55 bg-emerald-500/15"
+                          : dragEligible === false
+                            ? "border-rose-400/55 bg-rose-500/12"
+                            : "";
+                      const sourceDimClass = isSource ? "opacity-40" : "";
+
                       const dndProps = {
                         onDragOver: (e: React.DragEvent) => {
                           if (draggingFrom === null) return;
@@ -323,8 +341,10 @@ export default function DraftRoomBoard({
                             {...dndProps}
                             className={[
                               // Pick card colors follow the owning team's accent — my team (sky) / each opponent's unique color.
+                              // During a drag, the team accent is replaced by the green/red eligibility tint.
                               "relative rounded-xl border px-3 py-2 text-left transition",
-                              accent.slot,
+                              dragMode && !isSource ? dragTintClass : accent.slot,
+                              sourceDimClass,
                               "cursor-grab active:cursor-grabbing",
                               hoverRingClass,
                             ].join(" ")}
@@ -369,7 +389,11 @@ export default function DraftRoomBoard({
                           key={`${team.id}-${slotIndex}`}
                           {...dndProps}
                           className={[
-                            "rounded-xl border border-dashed border-white/10 bg-black/15 px-3 py-2 text-[11px] text-white/25 transition",
+                            "rounded-xl border border-dashed px-3 py-2 text-[11px] transition",
+                            // Empty slot: neutral by default; turns green/red during a drag.
+                            dragMode
+                              ? `${dragTintClass} text-white/40`
+                              : "border-white/10 bg-black/15 text-white/25",
                             hoverRingClass,
                           ].join(" ")}
                         >
