@@ -15,7 +15,6 @@ import type {
   DraftTeam,
 } from "../../../types/draft";
 import {
-  draftCostClass,
   getPlayerDraftStatus,
   mlbTeamBadgeClass,
   teamAccentClass,
@@ -31,15 +30,15 @@ type Props = {
   pageSize: number;
   totalPages: number;
   onChangePage: (next: number) => void;
-  statColumnLabels: string[];
-  batterCols: string[];
-  pitcherCols: string[];
+  // Fixed length of 5. null slots render as empty cells / empty headers to prevent horizontal shift.
+  statColumnLabels: (string | null)[];
+  batterCols: (string | null)[];
+  pitcherCols: (string | null)[];
   loading: boolean;
   error: string | null;
   authed: boolean;
   hasDraftConfig: boolean;
   notes: Record<string, string>;
-  affectedPlayerIds: Set<string>;
   compareAId: string | null;
   compareBId: string | null;
   onAddPick: (player: DraftPlayerPublic) => void;
@@ -65,7 +64,6 @@ export default function PlayerListTable({
   authed,
   hasDraftConfig,
   notes,
-  affectedPlayerIds,
   compareAId,
   compareBId,
   onAddPick,
@@ -77,17 +75,16 @@ export default function PlayerListTable({
   return (
     <FadeIn delayMs={140}>
       <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5">
-        <div className="grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] bg-black/40 px-4 py-3 text-xs font-extrabold text-white/60">
+        <div className="grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_1.3fr_1.1fr_.9fr] bg-black/40 px-4 py-3 text-xs font-extrabold text-white/60">
           <div className="text-center">#</div>
           <div>Player</div>
           <div className="text-center">Pos</div>
-          <div className="text-center">Cost</div>
           <div className="text-center">Team</div>
-          <div className="text-center">{statColumnLabels[0]}</div>
-          <div className="text-center">{statColumnLabels[1]}</div>
-          <div className="text-center">{statColumnLabels[2]}</div>
-          <div className="text-center">{statColumnLabels[3]}</div>
-          <div className="text-center">{statColumnLabels[4]}</div>
+          <div className="text-center">{statColumnLabels[0] ?? ""}</div>
+          <div className="text-center">{statColumnLabels[1] ?? ""}</div>
+          <div className="text-center">{statColumnLabels[2] ?? ""}</div>
+          <div className="text-center">{statColumnLabels[3] ?? ""}</div>
+          <div className="text-center">{statColumnLabels[4] ?? ""}</div>
           <div className="text-center">PPA-Value</div>
           <div className="text-center">Action</div>
           <div className="text-center">Compare</div>
@@ -112,7 +109,7 @@ export default function PlayerListTable({
             !error &&
             players.map((player, idx) => {
               const status = getPlayerDraftStatus(player.id, picks, teams);
-              // 픽된 경우 그 팀의 accent 컬러 — 뱃지를 팀별 색으로 통일.
+              // If picked, use that team's accent color — badge color stays consistent per team.
               const pickedByTeamIdx =
                 status.kind !== "available"
                   ? teams.findIndex((t) => t.id === status.teamId)
@@ -130,7 +127,7 @@ export default function PlayerListTable({
                 <div
                   key={player.id}
                   className={[
-                    "grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] items-center px-4 py-3 text-sm text-white/85 transition tabular-nums",
+                    "grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_1.3fr_1.1fr_.9fr] items-center px-4 py-3 text-sm text-white/85 transition tabular-nums",
                     compareActive
                       ? "relative z-[1] my-1 rounded-xl border border-emerald-400/75 bg-emerald-500/10 shadow-[0_0_18px_rgba(16,185,129,0.35)]"
                       : "hover:bg-white/5",
@@ -139,13 +136,6 @@ export default function PlayerListTable({
                   <div className="text-center text-white/45">{(page - 1) * pageSize + idx + 1}</div>
 
                   <div className="min-w-0 flex items-center gap-1">
-                    {affectedPlayerIds.has(player.id) && (
-                      <span
-                        className="inline-block h-2 w-2 shrink-0 rounded-full bg-rose-500 animate-pulse"
-                        title="Recent update"
-                        aria-label="Recent update"
-                      />
-                    )}
                     <button
                       type="button"
                       onClick={() => onOpenPlayerInfo(player.id, player.playerType)}
@@ -192,8 +182,6 @@ export default function PlayerListTable({
                     </span>
                   </div>
 
-                  <div className={`text-center ${draftCostClass(authed)}`}>${player.recommendedBid ?? "—"}</div>
-
                   <div className="text-center">
                     <span
                       className={[
@@ -206,16 +194,16 @@ export default function PlayerListTable({
                   </div>
 
                   {(isPitcherOnly(player) ? pitcherCols : batterCols).map((key, colIdx) => {
-                    const def = getStatDef(key);
+                    const def = key ? getStatDef(key) : null;
                     const value = def ? def.accessor(player) : null;
-                    const display = def ? def.format(value) : "—";
-                    // 짝수 컬럼 옅은 화이트, 홀수 컬럼 앰버 강조 — 시선 흐름.
+                    const display = key === null ? "" : def ? def.format(value) : "—";
+                    // Even columns get a faint white; odd columns are highlighted amber — guides the eye.
                     const cellClass =
                       colIdx % 2 === 0
                         ? "text-center text-white/70"
                         : "text-center font-semibold text-amber-300";
                     return (
-                      <div key={key} className={cellClass}>
+                      <div key={`stat-${colIdx}`} className={cellClass}>
                         {display}
                       </div>
                     );

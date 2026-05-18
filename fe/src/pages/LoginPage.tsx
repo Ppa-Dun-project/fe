@@ -1,34 +1,34 @@
-// useNavigate: 페이지 이동 함수
-// useSearchParams: URL의 쿼리 파라미터(?foo=bar)를 읽는 훅
+// useNavigate: function for page navigation
+// useSearchParams: hook for reading URL query parameters (?foo=bar)
 import { useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-// Google OAuth 공통 훅
+// Shared Google OAuth hook
 import { useGoogleSignIn } from "../lib/googleAuth";
 
 /**
- * LoginPage: 로그인 전용 페이지 (/login)
- * - URL의 ?redirect 파라미터를 읽어서 로그인 후 그 페이지로 돌아감
- * - ?error 파라미터가 있으면 에러 메시지 표시
+ * LoginPage: dedicated login page (/login)
+ * - Reads the URL ?redirect parameter and returns to that page after login
+ * - Displays an error message when the ?error parameter is present
  */
 export default function LoginPage() {
   const navigate = useNavigate();
-  // useSearchParams: [현재 파라미터, 파라미터 변경 함수] 반환
+  // useSearchParams: returns [current params, setter for params]
   const [params] = useSearchParams();
 
-  // URL 에러 파라미터 (예: /login?error=unauthorized)
+  // URL error parameter (e.g. /login?error=unauthorized)
   const urlError = params.get("error");
-  // 런타임 인증 에러 (Google 로그인 실패 시)
+  // Runtime auth error (when Google sign-in fails)
   const [authError, setAuthError] = useState<string | null>(null);
 
-  // redirect 파라미터 읽고 디코딩 (없으면 기본값 "/")
-  // decodeURIComponent: encodeURIComponent의 반대 (복원)
+  // Read and decode the redirect parameter (defaults to "/" if absent)
+  // decodeURIComponent: the inverse of encodeURIComponent (restores the original string)
   const redirect = params.get("redirect")
     ? decodeURIComponent(params.get("redirect") as string)
     : "/";
 
-  // useGoogleSignIn: Google 로그인 버튼을 렌더링하고 인증 흐름 처리
-  // - onSuccess: 로그인 성공 시 실행 (replace: true → 뒤로가기로 로그인 페이지 복귀 방지)
-  // - onError: 실패 시 에러 메시지 받아 UI 표시
+  // useGoogleSignIn: renders the Google sign-in button and handles the auth flow
+  // - onSuccess: runs on successful login (replace: true → prevents going back to the login page)
+  // - onError: receives the error message on failure and surfaces it in the UI
   const buttonRef = useGoogleSignIn(
     () => {
       setAuthError(null);
@@ -51,15 +51,15 @@ export default function LoginPage() {
           Sign in with your Google account to access all features.
         </p>
 
-        {/* 에러가 있으면 빨간색 알림 박스 표시 */}
-        {/* && 연산자: error가 truthy일 때만 뒤의 JSX 렌더링 */}
+        {/* Display a red alert box when an error is present */}
+        {/* && operator: renders the trailing JSX only when error is truthy */}
         {error && (
           <div className="mt-4 rounded-2xl border border-red-500/30 bg-red-500/10 p-4 text-sm text-red-200">
             Login failed: {error}
           </div>
         )}
 
-        {/* Google 로그인 버튼이 여기에 렌더링됨 (useGoogleSignIn이 처리) */}
+        {/* The Google sign-in button gets rendered here (useGoogleSignIn handles it) */}
         <div ref={buttonRef} className="mt-6 w-full opacity-85 transition hover:opacity-100" />
       </div>
     </div>

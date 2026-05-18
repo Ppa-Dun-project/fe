@@ -1,18 +1,33 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { DraftPlayer } from "../../../types/draft";
+import type { ContractCode, DraftPlayer } from "../../../types/draft";
 
 type Props = {
   open: boolean;
   player: DraftPlayer | null;
   remainingBudget: number;
+  // The recommended bid the parent fetches with a single call when the modal opens (null + bidLoading=true while in flight).
+  recommendedBid: number | null;
+  bidLoading: boolean;
   onClose: () => void;
-  onConfirm: (bid: number) => void;
+  onConfirm: (bid: number, contractCode: ContractCode) => void;
 };
+
+// Mirrors the "implementation view" column from the spec image. Shown via hover tooltip (title attr).
+// LX/X are excluded from the picker because they don't make sense as initial acquisition codes (natural expiration / unprotected state) — they only appear as rollover results.
+const CONTRACT_OPTIONS: { code: ContractCode; label: string; tooltip: string }[] = [
+  { code: "F3", label: "F3", tooltip: "Free Agent contract, year 3 begins / 3 years remaining. Default starting value for a newly-signed long-term FA." },
+  { code: "F2", label: "F2", tooltip: "Free Agent contract, 2 years remaining. F3 → F2 after one season passes." },
+  { code: "F1", label: "F1", tooltip: "Free Agent contract, final year. Re-sign / extend / release decision is required next offseason." },
+  { code: "S1", label: "S1", tooltip: "Short / single-year contract. Used for short-term signings, fill-ins, and draft replacement players." },
+  { code: "L2", label: "L2", tooltip: "Long-term contract with 2 years remaining. An existing player who was extended." },
+];
 
 export default function AddBidModal({
   open,
   player,
   remainingBudget,
+  recommendedBid,
+  bidLoading,
   onClose,
   onConfirm,
 }: Props) {
@@ -22,6 +37,8 @@ export default function AddBidModal({
   }, [player]);
 
   const [bid, setBid] = useState(initialBid);
+  // Default to F3 — the most common case for a new FA signing. Users pick manually for any other case.
+  const [contractCode, setContractCode] = useState<ContractCode>("F3");
   const [minBidErrorOpen, setMinBidErrorOpen] = useState(false);
   const [budgetErrorOpen, setBudgetErrorOpen] = useState(false);
   const minBidTimerRef = useRef<number | null>(null);
@@ -76,7 +93,7 @@ export default function AddBidModal({
       openBudgetError();
       return;
     }
-    onConfirm(parsedBid);
+    onConfirm(parsedBid, contractCode);
   };
 
   return (
@@ -111,7 +128,13 @@ export default function AddBidModal({
                   value={bid}
                   onChange={(e) => setBid(e.target.value)}
                   inputMode="numeric"
-                  placeholder="Enter winning bid"
+                  placeholder={
+                    bidLoading
+                      ? "Loading recommendation..."
+                      : recommendedBid !== null
+                        ? `Recommended: $${recommendedBid}`
+                        : "Enter winning bid"
+                  }
                   className={[
                     "w-full rounded-2xl bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35",
                     bidInputErrorOpen
@@ -143,10 +166,38 @@ export default function AddBidModal({
               </div>
             </div>
 
+            <div>
+              <div className="text-xs font-extrabold text-white/70">Contract</div>
+              <div className="mt-2 grid grid-cols-5 gap-1.5">
+                {CONTRACT_OPTIONS.map((opt) => {
+                  const active = contractCode === opt.code;
+                  return (
+                    <button
+                      key={opt.code}
+                      type="button"
+                      onClick={() => setContractCode(opt.code)}
+                      title={opt.tooltip}
+                      className={[
+                        "rounded-xl border px-2 py-2 text-xs font-black transition",
+                        active
+                          ? "border-emerald-400/50 bg-emerald-500/15 text-emerald-200"
+                          : "border-white/10 bg-black/30 text-white/70 hover:bg-white/5",
+                      ].join(" ")}
+                    >
+                      {opt.label}
+                    </button>
+                  );
+                })}
+              </div>
+              <div className="mt-2 text-xs text-white/35">
+                Keeper contract status. Hover for details.
+              </div>
+            </div>
+
             <div className="border-t border-white/10 pt-4">
               <div className="text-xs font-extrabold text-white/70">Draft cost</div>
               <div className="mt-2 text-3xl font-black text-emerald-400">
-                ${player.recommendedBid ?? "—"}
+                {bidLoading ? "..." : recommendedBid !== null ? `$${recommendedBid}` : "—"}
               </div>
               <div className="mt-1 text-xs text-white/35">
                 This is the recommended draft cost baseline.

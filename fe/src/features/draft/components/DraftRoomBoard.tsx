@@ -4,37 +4,40 @@ import { MINOR_TAXI_SLOT_COUNT, isEligibleForSlot, teamAccentClass } from "../ut
 
 type Props = {
   teams: DraftTeam[];
-  slotTemplate: string[];                 // 메인 보드 슬롯 (마이너/택시는 컴포넌트가 자체 생성)
-  picks: DraftPick[];                     // 모든 kind 통합 — 컴포넌트가 view 로 필터
+  slotTemplate: string[];                 // Main board slots (minor/taxi slots are generated internally by the component)
+  picks: DraftPick[];                     // All kinds combined — the component filters by view
   playersById: Record<string, DraftPlayer>;
   currentRound: number;
   totalRounds: number;
   authed: boolean;
-  view: DraftPickKind;                    // 현재 보고 있는 보드
+  view: DraftPickKind;                    // The board currently being viewed
   onViewChange: (next: DraftPickKind) => void;
   onRemovePick: (pick: DraftPick) => void;
-  // 한 팀 안에서 드래그-드롭으로 슬롯 인덱스를 바꿀 때 호출. (내 팀 + 상대 팀 모두)
-  // teamId 는 드래그가 일어난 팀 — 호출자가 어떤 팀의 픽을 재배치할지 결정하는 데 사용.
-  // 마이너/택시는 자격 검사 없이 순수 재정렬.
+  // Called when slots/teams are swapped via drag-and-drop.
+  //  - fromTeamId === toTeamId: reorder within the same team (main allows swap, minor/taxi is a pure reorder)
+  //  - Otherwise: cross-team move. Main board checks eligibility + empty slot; minor/taxi just requires an empty slot.
   onSlotReassign?: (
+    fromTeamId: string,
     fromIndex: number,
+    toTeamId: string,
     toIndex: number,
     kind: DraftPickKind,
-    teamId: string,
   ) => void;
+  // Callback to open the Ordered Draft History modal. Only shown on the main board.
+  onOpenHistory?: () => void;
 };
 
-// Drag payload: { teamId, slotIndex } JSON. teamId 가 일치할 때만 drop 을 허용.
+// Drag payload: { teamId, slotIndex } JSON. Drops are only allowed when teamId matches.
 const DRAG_MIME = "application/x-ppadun-slot";
 
-// 보드 탭. 항상 3개 모두 노출하고 현재 view 만 강조.
+// Board tabs. All three are always shown; only the current view is highlighted.
 const ALL_TABS: { key: DraftPickKind; label: string }[] = [
   { key: "minor", label: "Minor" },
   { key: "main", label: "Main" },
   { key: "taxi", label: "Taxi" },
 ];
 
-// 보드별 헤더 텍스트.
+// Header text per board.
 const BOARD_HEADER: Record<DraftPickKind, { title: string; subtitle: string }> = {
   main: { title: "Draft Room", subtitle: "Live draft status by team" },
   minor: { title: "Minor Draft", subtitle: "Free picks before main draft" },
@@ -53,19 +56,20 @@ export default function DraftRoomBoard({
   onViewChange,
   onRemovePick,
   onSlotReassign,
+  onOpenHistory,
 }: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
 
-  // 드래그 진행 중인 출발 슬롯 — 팀 안에서만 재배치하므로 teamId 도 함께 기억.
+  // The source slot of the active drag — we also track teamId since reordering is scoped to a team.
   const [draggingFrom, setDraggingFrom] = useState<{ teamId: string; index: number } | null>(null);
-  // 드래그가 hover 중인 슬롯 — 자격 여부에 따라 테두리 색을 다르게 칠한다.
+  // The slot currently hovered during a drag — the border color depends on whether the drop is eligible.
   const [hoverTarget, setHoverTarget] = useState<{
     teamId: string;
     index: number;
     ok: boolean;
   } | null>(null);
 
-  // 현재 보드에 해당하는 픽만 추려서 팀별로 정렬.
+  // Filter picks to the current board and group them by team.
   const picksByTeam = useMemo(() => {
     const map = new Map<string, DraftPick[]>();
     for (const team of teams) map.set(team.id, []);
@@ -80,7 +84,7 @@ export default function DraftRoomBoard({
     return map;
   }, [teams, picks, view]);
 
-  // view 에 따라 슬롯 템플릿 선택. 마이너/택시는 8개 평면 슬롯 (라벨 없음).
+  // Pick the slot template based on view. Minor/taxi are 8 flat slots with no labels.
   const effectiveSlotTemplate = useMemo(
     () =>
       view === "main"
@@ -102,21 +106,29 @@ export default function DraftRoomBoard({
 
   if (!authed) return null;
 
-  // 출발 슬롯의 player 가 target 슬롯에 자격이 있는지 확인 (메인만 의미 있음).
-  // 마이너/택시는 슬롯 자격 자체가 없으니 항상 OK.
-  // teamId 는 hover 대상 팀 — 출발 팀과 같지 않으면 드롭 불가.
-  const isHoverEligible = (teamId: string, toIndex: number): boolean => {
+  // Check whether the source slot's player is eligible for the target slot.
+  //  - Same team: main checks eligibility (occupied slots can also swap, so OK is shown); minor/taxi is always OK.
+  //  - Different team: must be an empty slot + eligible (main) or just an empty slot (minor/taxi).
+  const isHoverEligible = (toTeamId: string, toIndex: number): boolean => {
     if (draggingFrom === null) return false;
-    if (draggingFrom.teamId !== teamId) return false;
-    if (draggingFrom.index === toIndex) return true;
-    if (view !== "main") return true;
+    if (draggingFrom.teamId === toTeamId && draggingFrom.index === toIndex) return true;
 
-    const fromPick = (picksByTeam.get(teamId) ?? []).find(
+    const fromPick = (picksByTeam.get(draggingFrom.teamId) ?? []).find(
       (p) => p.slotIndex === draggingFrom.index
     );
     if (!fromPick) return false;
     const player = playersById[fromPick.playerId];
     if (!player) return false;
+
+    const isCrossTeam = draggingFrom.teamId !== toTeamId;
+    if (isCrossTeam) {
+      const targetOccupied = (picksByTeam.get(toTeamId) ?? []).some(
+        (p) => p.slotIndex === toIndex
+      );
+      if (targetOccupied) return false;
+    }
+
+    if (view !== "main") return true;
     const toSlotPos = effectiveSlotTemplate[toIndex];
     if (!toSlotPos) return false;
     return isEligibleForSlot(player.positions, toSlotPos);
@@ -127,7 +139,7 @@ export default function DraftRoomBoard({
 
   return (
     <section className="relative mt-10 rounded-3xl border border-white/10 bg-white/5 p-4">
-      {/* 상단 중앙에 붙은 탭 — 항상 3개 노출, 활성 탭은 박스와 한 면처럼 이어진다 */}
+      {/* Tabs pinned to the top center — all 3 are always visible; the active tab visually merges with the box */}
       <div className="absolute left-1/2 top-0 z-10 flex -translate-x-1/2 -translate-y-full">
         {ALL_TABS.map((tab) => {
           const isActive = tab.key === view;
@@ -139,7 +151,7 @@ export default function DraftRoomBoard({
               className={[
                 "rounded-t-xl border border-white/10 px-5 py-1.5 text-xs font-black uppercase tracking-wider transition",
                 isActive
-                  ? // 활성: 박스 내부와 동일한 불투명 색(#000 위 white/5 합성값)으로 보더를 완전 가림. 안쪽 위 하이라이트로 살짝 입체.
+                  ? // Active: use the same opaque color as the box interior (#000 composited with white/5) to fully hide the border. A subtle top inset highlight adds a 3D feel.
                     "relative z-10 translate-y-px border-b-0 bg-[#0d0d0d] text-white shadow-[inset_0_1px_0_0_rgba(255,255,255,0.12)]"
                   : "border-b-0 bg-white/[0.02] text-white/45 hover:bg-white/[0.05] hover:text-white/75",
               ].join(" ")}
@@ -163,8 +175,20 @@ export default function DraftRoomBoard({
         </div>
 
         {isMainView && (
-          <div className="text-sm font-black text-emerald-400">
-            Round {currentRound} / {totalRounds}
+          <div className="flex items-center gap-3">
+            {onOpenHistory && (
+              <button
+                type="button"
+                onClick={onOpenHistory}
+                className="rounded-xl border border-white/15 bg-black/25 px-3 py-1.5 text-xs font-black text-white/80 transition hover:bg-white/10"
+                title="View ordered draft history"
+              >
+                History
+              </button>
+            )}
+            <div className="text-sm font-black text-emerald-400">
+              Round {currentRound} / {totalRounds}
+            </div>
           </div>
         )}
       </div>
@@ -219,7 +243,7 @@ export default function DraftRoomBoard({
                       const pick = teamPicks.find((p) => p.slotIndex === slotIndex);
                       const player = pick ? playersById[pick.playerId] : null;
 
-                      // DnD 는 모든 팀에서 활성. 단, 출발-목적 팀이 같아야 drop 허용.
+                      // DnD is active for every team. However, drops are only allowed when source and target teams match.
                       const hovered =
                         hoverTarget?.teamId === team.id && hoverTarget?.index === slotIndex;
                       const hoverOk = hovered && hoverTarget?.ok === true;
@@ -233,8 +257,6 @@ export default function DraftRoomBoard({
                       const dndProps = {
                         onDragOver: (e: React.DragEvent) => {
                           if (draggingFrom === null) return;
-                          // 다른 팀에서 출발한 드래그는 받지 않음 — preventDefault 안 하면 "no-drop" 커서.
-                          if (draggingFrom.teamId !== team.id) return;
                           e.preventDefault();
                           e.dataTransfer.dropEffect = "move";
                           const ok = isHoverEligible(team.id, slotIndex);
@@ -265,10 +287,16 @@ export default function DraftRoomBoard({
                               teamId?: unknown;
                               slotIndex?: unknown;
                             };
-                            if (parsed.teamId !== team.id) return;
+                            if (typeof parsed.teamId !== "string") return;
                             if (typeof parsed.slotIndex !== "number") return;
                             if (!Number.isFinite(parsed.slotIndex)) return;
-                            onSlotReassign?.(parsed.slotIndex, slotIndex, view, team.id);
+                            onSlotReassign?.(
+                              parsed.teamId,
+                              parsed.slotIndex,
+                              team.id,
+                              slotIndex,
+                              view,
+                            );
                           } catch {
                             // ignore malformed payload
                           }
@@ -294,7 +322,7 @@ export default function DraftRoomBoard({
                             }}
                             {...dndProps}
                             className={[
-                              // 픽 카드 색은 픽을 가진 팀의 accent 로 통일 — 내 팀(sky) / 각 opponent 의 고유 색.
+                              // Pick card colors follow the owning team's accent — my team (sky) / each opponent's unique color.
                               "relative rounded-xl border px-3 py-2 text-left transition",
                               accent.slot,
                               "cursor-grab active:cursor-grabbing",
@@ -310,7 +338,7 @@ export default function DraftRoomBoard({
                               x
                             </button>
 
-                            {/* 마이너/택시는 포지션 라벨 없이 슬롯 번호만 */}
+                            {/* Minor/taxi show only the slot number without a position label */}
                             {isMainView ? (
                               <div className="text-[9px] font-extrabold uppercase tracking-wide text-white/40">
                                 {slotPos}

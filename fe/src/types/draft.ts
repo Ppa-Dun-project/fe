@@ -1,68 +1,77 @@
 /**
- * DraftPlayerPublic: 공개 /api/draft/players 가 돌려주는 선수 기본 정보
- * - PPA-DUN 값과 추천 드래프트 비용은 포함되지 않음 (인증 사용자 전용 엔드포인트에서 별도 제공)
+ * DraftPlayerPublic: basic player info returned by the public /api/draft/players endpoint.
+ * - PPA-DUN value and recommended draft bid are NOT included here (served separately from the authenticated endpoint).
  */
 export type DraftPlayerPublic = {
   id: string;
   name: string;
   playerType: "batter" | "pitcher" | "two_way";
-  team: string;                  // MLB 팀 약어 (예: "NYY")
-  positions: string[];           // 포지션 배열 (예: ["OF", "DH"])
+  team: string;                  // MLB team abbreviation (e.g. "NYY")
+  positions: string[];           // Array of positions (e.g. ["OF", "DH"])
 
-  // ── 타자 스탯 ────────────────────────────────────────────────────────
-  ab: number | null;             // 타수
-  r: number | null;              // 득점 (타자) / 실점 (투수)
-  h: number | null;              // 안타 (타자) / 피안타 (투수)
-  single: number | null;         // 1루타
-  double: number | null;         // 2루타
-  triple: number | null;         // 3루타
-  hr: number | null;             // 홈런 (타자) / 피홈런 (투수)
-  rbi: number | null;            // 타점
-  bb: number | null;             // 볼넷 (타자) / 볼넷 허용 (투수)
-  k: number | null;              // 삼진
-  sb: number | null;             // 도루
-  cs: number | null;             // 도루 실패
-  avg: number | null;            // 타율
-  obp: number | null;            // 출루율
-  slg: number | null;            // 장타율
+  // ── Batter stats ────────────────────────────────────────────────────────
+  ab: number | null;             // At-bats
+  r: number | null;              // Runs scored (batter) / runs allowed (pitcher)
+  h: number | null;              // Hits (batter) / hits allowed (pitcher)
+  single: number | null;         // Singles
+  double: number | null;         // Doubles
+  triple: number | null;         // Triples
+  hr: number | null;             // Home runs (batter) / home runs allowed (pitcher)
+  rbi: number | null;            // Runs batted in
+  bb: number | null;             // Walks (batter) / walks allowed (pitcher)
+  k: number | null;              // Strikeouts
+  sb: number | null;             // Stolen bases
+  cs: number | null;             // Caught stealing
+  avg: number | null;            // Batting average
+  obp: number | null;            // On-base percentage
+  slg: number | null;            // Slugging percentage
 
-  // ── 투수 스탯 (h, r, hr, bb 는 위와 공유 — 문맥에 따라 의미가 달라짐) ──
-  w: number | null;              // 승
-  l: number | null;              // 패
-  sv: number | null;             // 세이브
-  so: number | null;             // 탈삼진
-  era: number | null;            // 평균자책점
+  // ── Pitcher stats (h, r, hr, bb are shared with above — meaning depends on context) ──
+  w: number | null;              // Wins
+  l: number | null;              // Losses
+  sv: number | null;             // Saves
+  so: number | null;             // Strikeouts (pitcher)
+  era: number | null;            // Earned run average
   whip: number | null;           // WHIP
-  ip: number | null;             // 이닝 (소수점은 1/3 단위 표기 — 184.2 = 184 2/3)
-  g: number | null;              // 등판
-  gs: number | null;             // 선발 등판
+  ip: number | null;             // Innings pitched (decimal is in 1/3 notation — 184.2 = 184 2/3)
+  g: number | null;              // Games appeared
+  gs: number | null;             // Games started
   war: number | null;            // WAR
   fip: number | null;            // FIP
-  er: number | null;             // 자책점
-  hbp: number | null;            // 사구
-  bf: number | null;             // 상대 타자 수
-  era_plus: number | null;       // 조정 ERA (ERA+)
-  h9: number | null;             // 9이닝당 피안타
-  hr9: number | null;             // 9이닝당 피홈런
-  bb9: number | null;             // 9이닝당 볼넷
-  so9: number | null;             // 9이닝당 탈삼진
-  so_bb: number | null;           // K/BB 비율
+  er: number | null;             // Earned runs
+  hbp: number | null;            // Hit by pitch
+  bf: number | null;             // Batters faced
+  era_plus: number | null;       // Adjusted ERA (ERA+)
+  h9: number | null;             // Hits allowed per 9 innings
+  hr9: number | null;             // Home runs allowed per 9 innings
+  bb9: number | null;             // Walks per 9 innings
+  so9: number | null;             // Strikeouts per 9 innings
+  so_bb: number | null;           // K/BB ratio
 };
 
 /**
- * DraftPlayerValue: 인증 필요 /api/draft/players/values 가 돌려주는 가치 정보
- * - playerId 를 키로 DraftPlayerPublic 과 머지해서 DraftPlayer 를 구성
+ * DraftPlayerValue: value info returned by the authenticated GET /api/draft/players/value endpoint.
+ * - Merged with DraftPlayerPublic using playerId as the key to build a DraftPlayer.
+ * - recommendedBid is fetched individually from the modal (DraftPlayerBid).
  */
 export type DraftPlayerValue = {
   playerId: string;
-  ppaValue: number | null;       // PPA-DUN 가치 점수
-  recommendedBid: number | null; // 추천 드래프트 비용
+  ppaValue: number | null;       // PPA-DUN value score
 };
 
 /**
- * DraftPlayer: UI 에서 사용하는 머지된 선수 타입
- * - 비로그인 또는 값 조회 실패 시 ppaValue / recommendedBid 가 undefined 가 될 수 있음
- * - 표시 시점에 formatPpa() / ?? 등으로 방어 필요
+ * DraftPlayerBid: single-item response from POST /api/draft/players/bid.
+ * - Called on demand while the modal is open after clicking the Add button.
+ */
+export type DraftPlayerBid = {
+  playerId: string;
+  recommendedBid: number | null;
+};
+
+/**
+ * DraftPlayer: the merged player type used by the UI.
+ * - ppaValue is populated by the batch fetch. recommendedBid is NOT populated in the merge flow (passed via modal props).
+ *   The type keeps it optional for compatibility, but mergePlayersWithValues no longer sets it.
  */
 export type DraftPlayer = DraftPlayerPublic & {
   ppaValue?: number | null;
@@ -70,59 +79,72 @@ export type DraftPlayer = DraftPlayerPublic & {
 };
 
 /**
- * DraftTeam: 드래프트 룸에 참여하는 팀
+ * DraftTeam: a team participating in the draft room.
  */
 export type DraftTeam = {
   id: string;
   name: string;
-  isMine?: boolean;              // 내 팀인지 여부 (선택)
+  isMine?: boolean;              // Whether this is my team (optional)
 };
 
 /**
- * DraftPickType: 드래프트 픽의 종류
- * - 유니온 타입: 두 값 중 하나만 가능
+ * DraftPickType: the kind of draft pick.
+ * - Union type: must be exactly one of the two values.
  */
 export type DraftPickType = "mine" | "taken";
 
 /**
- * DraftPickKind: 어느 보드에 속한 픽인지 구분
- * - main: 일반 드래프트 (포지션 슬롯 + bid)
- * - minor / taxi: 메인 드래프트 전/후로 따로 잡는 무료 픽. 포지션·bid 없음.
+ * DraftPickKind: identifies which board a pick belongs to.
+ * - main: the regular draft (position slot + bid).
+ * - minor / taxi: free picks made before or after the main draft. No position or bid.
  */
 export type DraftPickKind = "main" | "minor" | "taxi";
 
 /**
- * DraftPick: 개별 드래프트 픽 정보
+ * ContractCode: keeper / contract status. The original value the user picked at signing time.
+ * When displayed on screen, computed dynamically by subtracting (targetSeason − signedSeason).
+ *   F3/F2/F1 = Free Agent (3/2/1 years remaining)
+ *   S1       = Single-year contract
+ *   L2/LX    = Long-term contract (2 years remaining / expired)
+ *   X        = Expired / unprotected
+ */
+export type ContractCode = "F3" | "F2" | "F1" | "S1" | "L2" | "LX" | "X";
+
+/**
+ * DraftPick: information for a single draft pick.
  */
 export type DraftPick = {
-  playerId: string;              // 뽑은 선수 ID
-  draftedByTeamId: string;       // 뽑은 팀 ID
-  slotIndex: number;             // 로스터 슬롯 번호
-  slotPos: string | null;        // 슬롯 포지션 — 마이너/택시는 null
-  bid: number | null;            // 낙찰가 ($) — 마이너/택시는 null
-  type: DraftPickType;           // "mine" 또는 "taken"
+  playerId: string;              // ID of the drafted player
+  draftedByTeamId: string;       // ID of the team that drafted the player
+  slotIndex: number;             // Roster slot index
+  slotPos: string | null;        // Slot position — null for minor/taxi
+  bid: number | null;            // Winning bid ($) — null for minor/taxi
+  type: DraftPickType;           // "mine" or "taken"
   kind: DraftPickKind;           // "main" | "minor" | "taxi"
+  contractCode?: ContractCode | null;  // Keeper contract code at signing time (null for legacy picks)
+  signedSeason?: number | null;        // targetSeason of the session when the player was signed (null for legacy picks)
 };
 
 /**
- * DraftConfigLocal: 드래프트 설정 (localStorage에 저장)
- * - HomePage에서 유저가 입력 → 드래프트 룸 진입 시 사용
+ * DraftConfigLocal: draft configuration (persisted in localStorage).
+ * - User fills this in on HomePage → consumed when entering the draft room.
  */
 export type DraftConfigLocal = {
   myTeamName?: string;
-  oppTeamNames?: string[];       // 상대 팀 이름들
-  opponentsCount?: number;       // 상대 수
-  leagueType?: string;           // "AL" | "NL" | "custom" (옛 세션은 "standard"|"lite" 가능 — fallback 처리)
-  budget?: number;               // 예산 ($)
-  rosterPlayers?: number;        // 로스터 인원
-  rosterSlots?: RosterSlotCounts; // 포지션별 슬롯 수
-  createdAt?: string;            // 설정 생성 시간
+  oppTeamNames?: string[];       // Names of the opponent teams
+  opponentsCount?: number;       // Number of opponents
+  leagueType?: string;           // "AL" | "NL" | "custom" (legacy sessions may have "standard"|"lite" — handled via fallback)
+  budget?: number;               // Budget ($)
+  rosterPlayers?: number;        // Roster size
+  rosterSlots?: RosterSlotCounts; // Slot count per position
+  targetSeason?: number;         // Reference season for keeper rollover (e.g. 2027)
+  createdAt?: string;            // Config creation timestamp
 };
 
 /**
- * DraftConfigServer: 백엔드 세션 응답에 들어 있는 config 형태
- * - DraftConfigLocal 과 달리 모든 필드가 필수 (서버가 정규화한 값)
- * - rosterSlots 는 옛 세션엔 없을 수 있어 선택적
+ * DraftConfigServer: the config shape contained in the backend session response.
+ * - Unlike DraftConfigLocal, every field is required (the server normalizes the values).
+ * - rosterSlots is optional because legacy sessions may not have it.
  */
 export type DraftConfigServer = {
   leagueType: string;
@@ -132,18 +154,19 @@ export type DraftConfigServer = {
   opponentsCount: number;
   oppTeamNames: string[];
   rosterSlots?: RosterSlotCounts;
+  targetSeason?: number | null;  // Legacy sessions may be null/undefined
 };
 
 /**
- * RosterSlotCounts: Draft Setup 모달에서 사용자가 정한 포지션별 슬롯 수.
- * 합계가 rosterPlayers 와 일치해야 Start Draft 가 활성화된다.
+ * RosterSlotCounts: the per-position slot counts chosen by the user in the Draft Setup modal.
+ * Start Draft is only enabled once the sum equals rosterPlayers.
  */
 export type RosterSlotPosition =
   | "C" | "1B" | "2B" | "3B" | "SS" | "OF" | "UTIL" | "SP" | "RP" | "BENCH";
 export type RosterSlotCounts = Record<RosterSlotPosition, number>;
 
 /**
- * SessionSummary: GET /api/draft/sessions 의 각 항목 (Import 모달용)
+ * SessionSummary: each item from GET /api/draft/sessions (used by the Import modal).
  */
 export interface SessionSummary {
   id: number;
@@ -154,7 +177,7 @@ export interface SessionSummary {
 }
 
 /**
- * SessionDetail: 단일 세션의 전체 데이터 (GET/POST/PUT 응답)
+ * SessionDetail: full data for a single session (GET/POST/PUT response).
  */
 export interface SessionDetail {
   id: number;
@@ -165,8 +188,8 @@ export interface SessionDetail {
 }
 
 /**
- * PlayerNote: 선수 메모. 세션당 (session_id, player_id) 조합으로 유니크.
- * - GET /api/draft/sessions/{id}/notes 응답 items 요소
+ * PlayerNote: a player note. Unique per (session_id, player_id) pair within a session.
+ * - An item in the GET /api/draft/sessions/{id}/notes response.
  */
 export type PlayerNote = {
   playerId: string;
@@ -175,33 +198,31 @@ export type PlayerNote = {
 };
 
 /**
- * DraftSort: 드래프트 페이지의 정렬 옵션
- * - _desc: 내림차순 (높은 것부터)
- * - _asc: 오름차순
+ * DraftSort: sort options for the draft page.
+ * - _desc: descending (highest first).
+ * - _asc: ascending.
  */
 export type DraftSort =
   | "score_desc"
   | "score_asc"
-  | "cost_desc"
-  | "cost_asc"
   | "avg_desc"
   | "hr_desc"
   | "rbi_desc"
   | "sb_desc";
 
 /**
- * DraftPositionFilter: 포지션 필터 옵션
- * - "ALL" 은 의도적으로 제외 — 타자/투수 스탯이 분리되어 한 화면에 섞으면
- *   빈 컬럼이 생기기 때문 ("pick 5 stat columns" 기능 대비).
- * - "P" 는 의도적으로 제외 — 투수는 SP / RP 로만 필터.
+ * DraftPositionFilter: position filter options.
+ * - "ALL" is intentionally excluded — batter and pitcher stats are separate, and mixing them
+ *   on one screen would leave empty columns (in preparation for the "pick 5 stat columns" feature).
+ * - "P" is intentionally excluded — pitchers can only be filtered as SP / RP.
  */
 export type DraftPositionFilter =
-  | "SP"       // 선발 투수
-  | "RP"       // 구원 투수
-  | "C"        // 포수
-  | "1B"       // 1루수
-  | "2B"       // 2루수
-  | "3B"       // 3루수
-  | "SS"       // 유격수
-  | "OF"       // 외야수
-  | "UTIL";    // 유틸리티
+  | "SP"       // Starting pitcher
+  | "RP"       // Relief pitcher
+  | "C"        // Catcher
+  | "1B"       // First base
+  | "2B"       // Second base
+  | "3B"       // Third base
+  | "SS"       // Shortstop
+  | "OF"       // Outfield
+  | "UTIL";    // Utility

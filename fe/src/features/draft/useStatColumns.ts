@@ -1,9 +1,9 @@
-// Hook backing the user's per-group stat-column selection (5 keys each).
-// Values live in localStorage so the choice persists across reloads on
-// this device only — same scope as ppadun_unsaved_draft.
-//
-// Reads validate length and key membership; bad data falls back to
-// defaults rather than crashing the page.
+// Hook backing the user's per-group stat-column selection (exactly 5 slots each).
+// Slots are always fixed at 5 — empty positions are null. To keep other columns
+// from shifting left when one is removed, X sets the slot to null and + fills
+// the first empty slot.
+// Values live in localStorage so the choice persists across reloads on this
+// device only — same scope as ppadun_unsaved_draft.
 
 import { useCallback, useState } from "react";
 import {
@@ -15,6 +15,8 @@ import {
   type StatGroup,
 } from "./statColumns";
 
+export type StatSlot = string | null;
+
 const BATTER_KEY = "ppadun_batter_stat_columns";
 const PITCHER_KEY = "ppadun_pitcher_stat_columns";
 
@@ -22,28 +24,40 @@ function storageKey(group: StatGroup): string {
   return group === "batter" ? BATTER_KEY : PITCHER_KEY;
 }
 
-function readCols(group: StatGroup): string[] {
-  const defaults = getDefaultsForGroup(group);
+// Always length 5. Pads with null if shorter; truncates to the first 5 if longer.
+function normalizeLength(cols: StatSlot[]): StatSlot[] {
+  if (cols.length === STAT_COLUMN_COUNT) return cols;
+  if (cols.length > STAT_COLUMN_COUNT) return cols.slice(0, STAT_COLUMN_COUNT);
+  return [...cols, ...Array<StatSlot>(STAT_COLUMN_COUNT - cols.length).fill(null)];
+}
+
+function readCols(group: StatGroup): StatSlot[] {
+  const defaults: StatSlot[] = [...getDefaultsForGroup(group)];
   try {
     const raw = localStorage.getItem(storageKey(group));
-    if (!raw) return [...defaults];
+    if (!raw) return normalizeLength(defaults);
     const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [...defaults];
-    if (parsed.length !== STAT_COLUMN_COUNT) return [...defaults];
-    // Every entry must be a known key in the matching group; otherwise
-    // the data is stale (e.g. backend renamed a column) and we reset.
+    if (!Array.isArray(parsed)) return normalizeLength(defaults);
+    // Legacy compatibility: reset if longer than 5, pad with null if shorter.
+    const slots: StatSlot[] = [];
     for (const k of parsed) {
-      if (typeof k !== "string") return [...defaults];
+      if (k === null) {
+        slots.push(null);
+        continue;
+      }
+      if (typeof k !== "string") return normalizeLength(defaults);
       const def = getStatDef(k);
-      if (!def || def.group !== group) return [...defaults];
+      // If the group doesn't match, treat the data as corrupted and fall back to defaults.
+      if (!def || def.group !== group) return normalizeLength(defaults);
+      slots.push(k);
     }
-    return parsed as string[];
+    return normalizeLength(slots);
   } catch {
-    return [...defaults];
+    return normalizeLength(defaults);
   }
 }
 
-function writeCols(group: StatGroup, cols: string[]): void {
+function writeCols(group: StatGroup, cols: StatSlot[]): void {
   try {
     localStorage.setItem(storageKey(group), JSON.stringify(cols));
   } catch {
@@ -53,39 +67,37 @@ function writeCols(group: StatGroup, cols: string[]): void {
 }
 
 export type UseStatColumns = {
-  batterCols: string[];
-  pitcherCols: string[];
-  setBatterCols: (cols: string[]) => void;
-  setPitcherCols: (cols: string[]) => void;
+  batterCols: StatSlot[];
+  pitcherCols: StatSlot[];
+  setBatterCols: (cols: StatSlot[]) => void;
+  setPitcherCols: (cols: StatSlot[]) => void;
   resetToDefaults: (group: StatGroup) => void;
 };
 
 export function useStatColumns(): UseStatColumns {
-  const [batterCols, setBatterColsState] = useState<string[]>(() => readCols("batter"));
-  const [pitcherCols, setPitcherColsState] = useState<string[]>(() => readCols("pitcher"));
+  const [batterCols, setBatterColsState] = useState<StatSlot[]>(() => readCols("batter"));
+  const [pitcherCols, setPitcherColsState] = useState<StatSlot[]>(() => readCols("pitcher"));
 
-  const setBatterCols = useCallback((cols: string[]) => {
-    if (cols.length !== STAT_COLUMN_COUNT) return;
-    writeCols("batter", cols);
-    setBatterColsState(cols);
+  // Always maintain a length of 5. Normalize any other length to guarantee consistency.
+  const setBatterCols = useCallback((cols: StatSlot[]) => {
+    const next = normalizeLength(cols);
+    writeCols("batter", next);
+    setBatterColsState(next);
   }, []);
 
-  const setPitcherCols = useCallback((cols: string[]) => {
-    if (cols.length !== STAT_COLUMN_COUNT) return;
-    writeCols("pitcher", cols);
-    setPitcherColsState(cols);
+  const setPitcherCols = useCallback((cols: StatSlot[]) => {
+    const next = normalizeLength(cols);
+    writeCols("pitcher", next);
+    setPitcherColsState(next);
   }, []);
 
   const resetToDefaults = useCallback((group: StatGroup) => {
-    if (group === "batter") {
-      const next = [...BATTER_DEFAULT_KEYS];
-      writeCols("batter", next);
-      setBatterColsState(next);
-    } else {
-      const next = [...PITCHER_DEFAULT_KEYS];
-      writeCols("pitcher", next);
-      setPitcherColsState(next);
-    }
+    const next: StatSlot[] = normalizeLength([
+      ...(group === "batter" ? BATTER_DEFAULT_KEYS : PITCHER_DEFAULT_KEYS),
+    ]);
+    writeCols(group, next);
+    if (group === "batter") setBatterColsState(next);
+    else setPitcherColsState(next);
   }, []);
 
   return { batterCols, pitcherCols, setBatterCols, setPitcherCols, resetToDefaults };

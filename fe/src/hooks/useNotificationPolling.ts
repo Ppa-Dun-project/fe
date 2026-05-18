@@ -1,12 +1,16 @@
-// 15초마다 백엔드 알림 폴링하는 훅.
+// Hook that polls the backend notification feed every 15 seconds.
 //
-// 동작:
-// 1. 마운트 시 첫 호출 응답의 latest_id 로 lastSeen을 맞춤 → 그 시점 이전의 모든
-//    알림은 무시 (토스트 안 띄움).
-// 2. 그 이후 polling은 since=lastSeen 으로 새로 들어온 알림만 받아 onEvent 호출.
+// Behavior:
+// 1. On mount, the first response's latest_id is used to set lastSeen → any
+//    notifications that existed before that point are ignored (no toast).
+// 2. Subsequent polls pass since=lastSeen so only newly arrived notifications
+//    are returned, and onEvents is invoked. The new events for one cycle are
+//    passed as a single array so the caller can batch them (e.g. collapse
+//    into one toast). Calling the callback per-event would cause a toast flood.
 //
-// localStorage catch-up은 의도적으로 안 함 — 사용자가 자는 동안 쌓인 알림을
-// 깨어나서 한꺼번에 토스트로 받는 게 오히려 불편하다는 피드백 반영.
+// We deliberately skip any localStorage catch-up — feedback was that getting
+// hit with a flood of toasts on wake-up (for notifications accumulated while
+// the user was away) is more annoying than useful.
 import { useEffect, useRef } from "react";
 
 import { apiGetAuth } from "../lib/api";
@@ -21,15 +25,16 @@ type Response = {
 };
 
 export function useNotificationPolling(
-  onEvent: (ev: NotificationEvent) => void,
+  onEvents: (evs: NotificationEvent[]) => void,
   enabled: boolean
 ) {
-  // 콜백을 ref에 넣어둠 — 매 polling 호출이 최신 콜백을 보게 하면서도
-  // effect deps에 onEvent를 안 넣어 매 렌더마다 polling 재시작되는 일 방지.
-  const onEventRef = useRef(onEvent);
+  // Keep the callback in a ref — each poll tick reads the latest callback,
+  // while leaving onEvents out of the effect deps prevents the polling loop
+  // from restarting on every render.
+  const onEventsRef = useRef(onEvents);
   useEffect(() => {
-    onEventRef.current = onEvent;
-  }, [onEvent]);
+    onEventsRef.current = onEvents;
+  }, [onEvents]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -45,7 +50,7 @@ export function useNotificationPolling(
         );
         if (cancelled) return;
 
-        // 첫 호출: latest_id로 시작점 잡음, items는 무시.
+        // First call: anchor the starting point at latest_id and ignore items.
         if (lastSeenId === null) {
           lastSeenId = data.latest_id;
           return;
@@ -54,17 +59,19 @@ export function useNotificationPolling(
         const items = data.items ?? [];
         if (items.length === 0) return;
 
+        // Advance lastSeenId before invoking the callback — that way, even if
+        // the callback throws, the same events won't reappear on the next tick.
         for (const ev of items) {
-          onEventRef.current(ev);
           if (ev.id > lastSeenId) lastSeenId = ev.id;
         }
+        onEventsRef.current(items);
       } catch (err) {
-        // 401, 5xx, 네트워크 끊김 등 — 다음 tick에 재시도하므로 조용히 처리.
+        // 401, 5xx, network drops, etc. — the next tick will retry, so handle quietly.
         if (!cancelled) console.warn("notification polling failed:", err);
       }
     };
 
-    tick(); // 마운트 시 즉시 한 번 (lastSeen 초기화)
+    tick(); // Fire immediately on mount (initializes lastSeen)
     const id = window.setInterval(tick, POLL_INTERVAL_MS);
     return () => {
       cancelled = true;

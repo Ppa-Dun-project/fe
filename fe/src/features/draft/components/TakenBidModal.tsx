@@ -6,7 +6,7 @@ type Props = {
   player: DraftPlayer | null;
   teams: DraftTeam[];
   remainingBudgetByTeam: Record<string, number>;
-  // 마이너/택시 보드는 bid 가 없음 — 입력 필드/검증 건너뛰고 bid=null 로 confirm.
+  // Minor/taxi boards have no bid — skip the input field/validation and confirm with bid=null.
   kind?: DraftPickKind;
   onClose: () => void;
   onConfirm: (draftedByTeamId: string, bid: number | null) => void;
@@ -26,6 +26,7 @@ export default function TakenBidModal({
 
   const initialTeamId = useMemo(() => otherTeams[0]?.id ?? "", [otherTeams]);
 
+  // The parent passes player.id as the `key` to remount the modal → useState's initial value gets re-evaluated each time.
   const [draftedByTeamId, setDraftedByTeamId] = useState(initialTeamId);
   const [bid, setBid] = useState("");
   const [minBidErrorOpen, setMinBidErrorOpen] = useState(false);
@@ -79,7 +80,6 @@ export default function TakenBidModal({
 
   const handleConfirm = () => {
     if (!validTeam) return;
-    // 마이너/택시는 bid 가 없으니 그대로 confirm.
     if (!isMainKind) {
       onConfirm(draftedByTeamId, null);
       return;

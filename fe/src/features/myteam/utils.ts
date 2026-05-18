@@ -1,4 +1,94 @@
 import type { MyTeamPlayer, MyTeamPosFilter, MyTeamSort } from "../../types/myteam";
+import type {
+  DraftPick,
+  DraftPlayerPublic,
+  DraftPlayerValue,
+} from "../../types/draft";
+import type { UnsavedDraft } from "../draft/draftHelpers";
+
+// Same shape as the backend MyTeamPlayersResponse (myteam.py).
+export type MyTeamSynthesized = {
+  items: MyTeamPlayer[];
+  totalBudget: number;
+  spentBudget: number;
+  remainingBudget: number;
+};
+
+// Synthesizes an unsaved draft (sessionStorage) into the same shape as the backend my-team response.
+// A client-side mirror of the backend's pick_my_players + get_budget_summary — so that the
+// My Team page reflects picks in real time even before saving.
+export function synthesizeUnsavedMyTeam(
+  unsaved: UnsavedDraft,
+  publicPlayers: DraftPlayerPublic[],
+  values: DraftPlayerValue[] | null,
+): MyTeamSynthesized {
+  // Main picks only — the backend returns every kind, but minor/taxi picks have slotPos === null
+  // so they can't be mapped to a pos: string. Showing only the main roster is also semantically aligned.
+  const mine = unsaved.picks
+    .filter((p) => p.draftedByTeamId === "team-0" && (p.kind ?? "main") === "main")
+    .sort((a, b) => a.slotIndex - b.slotIndex);
+
+  const playersById = new Map(publicPlayers.map((p) => [p.id, p]));
+  const valueById = new Map((values ?? []).map((v) => [v.playerId, v.ppaValue]));
+
+  const items: MyTeamPlayer[] = [];
+  for (const pick of mine) {
+    const player = playersById.get(pick.playerId);
+    if (!player) continue;
+
+    const item = buildMyTeamItemFromPick(pick, player, valueById.get(player.id) ?? null);
+    items.push(item);
+  }
+
+  const totalBudget = unsaved.config?.budget ?? 0;
+  const spentBudget = items.reduce((sum, p) => sum + p.cost, 0);
+  const remainingBudget = Math.max(0, totalBudget - spentBudget);
+
+  return { items, totalBudget, spentBudget, remainingBudget };
+}
+
+function buildMyTeamItemFromPick(
+  pick: DraftPick,
+  player: DraftPlayerPublic,
+  ppaValue: number | null,
+): MyTeamPlayer {
+  // SP/RP slots are treated as pitchers (including two_way players). Otherwise use player.playerType as-is.
+  const isPitcherSlot = pick.slotPos === "SP" || pick.slotPos === "RP";
+  const playerType: "batter" | "pitcher" =
+    player.playerType === "pitcher" || (player.playerType === "two_way" && isPitcherSlot)
+      ? "pitcher"
+      : "batter";
+
+  // Mirrors the backend: for BENCH, wrap the original position in parentheses; absorb DH/TWP into UTIL.
+  let displayPos: string;
+  if (pick.slotPos === "BENCH") {
+    const raw = player.positions[0] ?? "UTIL";
+    const original = raw === "DH" || raw === "TWP" ? "UTIL" : raw;
+    displayPos = `BENCH(${original})`;
+  } else {
+    displayPos = pick.slotPos ?? "UTIL";
+  }
+
+  return {
+    id: player.id,
+    name: player.name,
+    playerType,
+    pos: displayPos,
+    cost: pick.bid ?? 0,
+    team: player.team ?? "",
+    avg: playerType === "batter" ? player.avg ?? 0 : 0,
+    hr: playerType === "batter" ? player.hr ?? 0 : 0,
+    rbi: playerType === "batter" ? player.rbi ?? 0 : 0,
+    sb: playerType === "batter" ? player.sb ?? 0 : 0,
+    w: playerType === "pitcher" ? player.w ?? 0 : null,
+    sv: playerType === "pitcher" ? player.sv ?? 0 : null,
+    so: playerType === "pitcher" ? player.so ?? 0 : null,
+    era: playerType === "pitcher" ? Number((player.era ?? 0).toFixed(2)) : null,
+    whip: playerType === "pitcher" ? Number((player.whip ?? 0).toFixed(3)) : null,
+    ip: playerType === "pitcher" ? Number((player.ip ?? 0).toFixed(1)) : null,
+    ppaValue: ppaValue ?? 0,
+  };
+}
 
 function isPitcher(player: MyTeamPlayer) {
   return player.playerType === "pitcher";
@@ -21,10 +111,10 @@ function speedSortValue(player: MyTeamPlayer) {
 }
 
 /**
- * 선수 목록 필터링
- * - 이름/팀명 검색 (대소문자 무시)
- * - 포지션 필터 (ALL이면 전체)
- * - BENCH(1B) 같은 포맷도 포지션 문자열에 포함되면 매칭
+ * Filters the player list
+ * - Search by name/team (case-insensitive)
+ * - Position filter (ALL matches everything)
+ * - Formats like BENCH(1B) also match if the position substring is contained in the player's pos string
  */
 export function filterMyTeam(
   players: MyTeamPlayer[],
@@ -41,9 +131,9 @@ export function filterMyTeam(
   });
 }
 
-/** 선수 목록 정렬 (정렬 옵션별 비교 함수 적용) */
+/** Sorts the player list (applying the comparison function for each sort option). */
 export function sortMyTeam(players: MyTeamPlayer[], sort: MyTeamSort): MyTeamPlayer[] {
-  // 원본 배열을 변경하지 않도록 복사본 사용
+  // Use a copy to avoid mutating the source array.
   const copy = [...players];
 
   switch (sort) {
@@ -68,7 +158,7 @@ export function sortMyTeam(players: MyTeamPlayer[], sort: MyTeamSort): MyTeamPla
   }
 }
 
-/** 타율을 .300 같은 야구식 표기로 포맷 (0이면 "-") */
+/** Formats a batting average in baseball notation like ".300" (returns "-" if 0). */
 export function formatAvg(avg: number) {
   if (!avg) return "-";
   return avg.toFixed(3).replace("0.", ".");

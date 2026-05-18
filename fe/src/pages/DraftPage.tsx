@@ -2,15 +2,15 @@
 // Displays: draft board (team rosters), player list with search/filter/sort,
 // player comparison panel, Add/Taken bid modals, and player info modal.
 //
-// Option A 데이터 흐름:
-//   1. 마운트 분기:
-//      - useParams.sessionId 있음 → GET /api/draft/sessions/{id} → React state
-//      - sessionId 없음 → sessionStorage["ppadun_unsaved_draft"] → React state
-//      - 둘 다 없으면 홈으로 리다이렉트
-//   2. 공개 GET /api/draft/players → 선수 목록 (값 없음)
-//   3. POST /api/draft/players/values, body { config, picks } → 머지용 값
-//   4. 픽 추가/삭제는 React state 만 갱신. 미저장 모드면 sessionStorage 도 sync.
-//   5. Save 버튼만이 유일한 서버 커밋 포인트 (POST 또는 PUT /api/draft/sessions[/id]).
+// Option A data flow:
+//   1. Mount branching:
+//      - useParams.sessionId present → GET /api/draft/sessions/{id} → React state
+//      - No sessionId → sessionStorage["ppadun_unsaved_draft"] → React state
+//      - Neither → redirect home
+//   2. Public GET /api/draft/players → player list (no values)
+//   3. POST /api/draft/players/values, body { config, picks } → values to merge in
+//   4. Adding/removing picks only updates React state. In unsaved mode, sessionStorage is also synced.
+//   5. The Save button is the sole server commit point (POST or PUT /api/draft/sessions[/id]).
 //
 // Filtering, sorting, and pagination all run client-side on the merged list.
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -20,10 +20,12 @@ import { useAuth } from "../lib/auth";
 import { apiGet, apiGetAuth, apiPostAuth, apiPutAuth, apiDeleteAuth } from "../lib/api";
 
 import type {
+  ContractCode,
   DraftConfigServer,
   DraftPick,
   DraftPickKind,
   DraftPlayer,
+  DraftPlayerBid,
   DraftPlayerPublic,
   DraftPlayerValue,
   DraftPositionFilter,
@@ -51,6 +53,7 @@ import {
   DEFAULT_POSITION_FILTERS,
   PITCHER_SORT_OPTIONS,
   UNSAVED_DRAFT_KEY,
+  arePlayersComparable,
   buildTeamsFromConfig,
   initialNameFor,
   isPitcherPositionFilter,
@@ -73,13 +76,16 @@ import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
 import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
 import PlayerNotePopover from "../features/draft/components/PlayerNotePopover";
-import CustomizeStatsModal from "../features/draft/components/CustomizeStatsModal";
+import StatPickerStrip from "../features/draft/components/StatPickerStrip";
 import SaveSessionModal from "../features/draft/components/SaveSessionModal";
+import RenameSessionModal from "../features/draft/components/RenameSessionModal";
 import NewDraftConfirmModal from "../features/draft/components/NewDraftConfirmModal";
 import ImportSessionsModal from "../features/draft/components/ImportSessionsModal";
+import CopySessionModal from "../features/draft/components/CopySessionModal";
 import PlayerListTable from "../features/draft/components/PlayerListTable";
 import DraftHeaderBar from "../features/draft/components/DraftHeaderBar";
 import PlayerSearchToolbar from "../features/draft/components/PlayerSearchToolbar";
+import OrderedDraftHistoryModal from "../features/draft/components/OrderedDraftHistoryModal";
 import ComparisonPanel from "../features/draft/components/ComparisonPanel";
 import { useStatColumns } from "../features/draft/useStatColumns";
 import { getStatDef } from "../features/draft/statColumns";
@@ -95,6 +101,24 @@ import DraftSetupCard, { type DraftSetupConfig } from "../features/home/DraftSet
 import LoginPromptModal from "../features/auth/LoginPromptModal";
 
 const PAGE_SIZE = 30;
+
+// Maps notification event_type → toast prefix + variant.
+// Unknown types fall back to a generic notification.
+function notificationDisplay(eventType: string): {
+  prefix: string;
+  variant: ToastVariant;
+} {
+  switch (eventType) {
+    case "INJURY":
+      return { prefix: "🏥 INJURY UPDATE", variant: "injury" };
+    case "DEPTH":
+      return { prefix: "📊 DEPTH CHART UPDATE", variant: "depth" };
+    case "NEWS":
+      return { prefix: "📰 MLB NEWS", variant: "info" };
+    default:
+      return { prefix: "🔔 NOTIFICATION", variant: "info" };
+  }
+}
 
 // Pure helpers, constants, and inline response/payload types live in
 // `draftHelpers.ts` so this file stays focused on orchestration. See that
@@ -114,18 +138,22 @@ export default function DraftPage() {
   const [searchParams] = useSearchParams();
   const draftRoomTopRef = useRef<HTMLDivElement | null>(null); // Scroll target after draft pick
 
-  // "Start Your Draft" 버튼이 띄우는 setup / 로그인 유도 모달.
+  // Setup / login-prompt modal that the "Start Your Draft" button opens.
   const [setupModalOpen, setSetupModalOpen] = useState(false);
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  // Right after Start Draft, cover the whole page with a blur while waiting for the first PPA-values response.
+  // Subsequent recomputations triggered by pick changes refresh in the background without an overlay.
+  const [pendingStartDraft, setPendingStartDraft] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
 
-  // "New" → "Save first?" Yes 경로에서 Save 가 끝난 직후 setup 모달을
-  // 자동으로 열기 위한 플래그. Save 모달이 cancel 되면 클리어.
+  // Flag used by the "New" → "Save first?" Yes path to automatically open
+  // the setup modal once Save finishes. Cleared when the Save modal is cancelled.
   const [postSaveAction, setPostSaveAction] = useState<"setup" | null>(null);
 
-  // "New" 클릭 시 띄우는 3-버튼 확인 모달 — 미저장 상태에서만 사용.
+  // The three-button confirmation modal shown on "New" click — used in unsaved state only.
   const [newConfirmOpen, setNewConfirmOpen] = useState(false);
 
-  // Toast queue. id 는 monotonic counter 로 부여한다.
+  // Toast queue. Ids are assigned via a monotonic counter.
   const toastIdRef = useRef(0);
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const pushToast = (
@@ -141,13 +169,13 @@ export default function DraftPage() {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   };
 
-  // 핵심 드래프트 state — 마운트 시 한 번 채워지고 이후 모든 픽 변경은 React state 만 갱신.
+  // Core draft state — populated once on mount, after which every pick change only updates React state.
   const [config, setConfig] = useState<DraftConfigServer | null>(null);
   const [hasDraftConfig, setHasDraftConfig] = useState(false);
   const [teams, setTeams] = useState<DraftTeam[]>([]);
-  // picks 는 useUndoStack 으로 관리해 undo / redo 를 지원한다.
-  //   - commitPicks: 사용자 행동에 의한 변경 (영입/제거/슬롯 이동) → 이력에 push
-  //   - resetPicks:  세션 전환 / 새 draft 시작 등 이력을 끊는 변경
+  // picks is managed by useUndoStack to support undo / redo.
+  //   - commitPicks: user-initiated changes (add/remove/slot move) → pushed onto history
+  //   - resetPicks:  changes that should break history (session switch, new draft start, etc.)
   const {
     state: picks,
     commit: commitPicks,
@@ -158,8 +186,8 @@ export default function DraftPage() {
     canRedo: canRedoPicks,
   } = useUndoStack<DraftPick[]>([]);
 
-  // 키보드 단축키 — Ctrl/Cmd+Z = undo, Ctrl+Y / Ctrl·Cmd+Shift+Z = redo.
-  // input / textarea / contenteditable 안에서는 무시 (브라우저 기본 undo 유지).
+  // Keyboard shortcuts — Ctrl/Cmd+Z = undo, Ctrl+Y / Ctrl·Cmd+Shift+Z = redo.
+  // Ignored inside input / textarea / contenteditable (preserves the browser's native undo).
   useUndoKeyboardShortcuts({
     onUndo: undoPicks,
     onRedo: redoPicks,
@@ -169,9 +197,9 @@ export default function DraftPage() {
   const [sessionName, setSessionName] = useState<string | null>(null);
   const [bootstrapped, setBootstrapped] = useState(false);
 
-  // 공개 API 에서 받아온 기본 목록 (값 없음)
+  // Base list fetched from the public API (no values attached)
   const [publicPlayers, setPublicPlayers] = useState<DraftPlayerPublic[]>([]);
-  // 인증 API 에서 받아온 값 테이블 — 비로그인 또는 조회 실패 시 null
+  // Values table fetched from the authenticated API — null when logged out or fetch fails
   const [playerValues, setPlayerValues] = useState<DraftPlayerValue[] | null>(null);
 
   const [query, setQuery] = useState(() => searchParams.get("query")?.trim() ?? "");
@@ -179,16 +207,16 @@ export default function DraftPage() {
   const [sort, setSort] = useState<DraftSort>("score_desc");
   const [page, setPage] = useState(1);
 
-  // 필터/정렬 옵션은 더 이상 서버가 내려주지 않음 — 상수 그대로 사용
+  // Filter/sort options are no longer returned by the server — use the constants directly
   const positionFilters = DEFAULT_POSITION_FILTERS;
   const showingPitcherColumns = isPitcherPositionFilter(position);
   const sortOptions = showingPitcherColumns ? PITCHER_SORT_OPTIONS : BATTER_SORT_OPTIONS;
 
-  // 사용자가 선택한 5개 스탯 (타자/투수 별도) — localStorage에 영구 저장.
-  const { batterCols, pitcherCols, setBatterCols, setPitcherCols } = useStatColumns();
-  const [customizeStatsOpen, setCustomizeStatsOpen] = useState(false);
+  // The user-selected 5 stat columns (separately for batters/pitchers) — persisted in localStorage.
+  const { batterCols, pitcherCols, setBatterCols, setPitcherCols, resetToDefaults: resetStatColumns } = useStatColumns();
   const activeStatKeys = showingPitcherColumns ? pitcherCols : batterCols;
-  const statColumnLabels = activeStatKeys.map((k) => getStatDef(k)?.label ?? k);
+  // If a slot is null, the header label is an empty string too — so neighboring columns don't shift.
+  const statColumnLabels = activeStatKeys.map((k) => (k ? getStatDef(k)?.label ?? k : ""));
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -200,59 +228,66 @@ export default function DraftPage() {
   const [profilePlayerId, setProfilePlayerId] = useState<number | null>(null);
   const [profilePlayerType, setProfilePlayerType] = useState<"batter" | "pitcher">("batter");
 
-  // 현재 보고 있는 보드 — 메인/마이너/택시. DraftRoomBoard 의 포스트잇 탭으로 전환.
-  // Add/Taken 액션은 이 view 의 kind 로 픽을 생성한다.
+  // Indicator while a player note is being saved — used to disable / show loading on the modal's Save button.
+  const [noteSaving, setNoteSaving] = useState(false);
+
+  // The board currently being viewed — main/minors/taxi. Switched via the post-it tabs on DraftRoomBoard.
+  // Add/Taken actions create picks with this view's kind.
   const [boardView, setBoardView] = useState<DraftPickKind>("main");
 
   const [addTarget, setAddTarget] = useState<DraftPlayer | null>(null);
+  // Recommended bid that's fetched on-the-fly when the Add modal opens, plus its in-flight state.
+  const [addTargetBid, setAddTargetBid] = useState<number | null>(null);
+  const [addTargetBidLoading, setAddTargetBidLoading] = useState(false);
   const [takenTarget, setTakenTarget] = useState<DraftPlayer | null>(null);
 
-  // 메모 — playerId → note. 로드 모드에서만 fetch/저장 동작 (세션 ID 필요).
+  // Notes — playerId → note. Fetch/save only happens in loaded mode (requires a session ID).
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [noteTarget, setNoteTarget] = useState<DraftPlayer | null>(null);
-  const [noteSaving, setNoteSaving] = useState(false);
+  // Polls the backend for notifications every 15 seconds. One toast per new event in a cycle (each shown for 10 seconds).
+  // - 10 or fewer: fire them all at once
+  // - 11 or more: stagger at 2-second intervals so they don't bury the screen all at once.
+  //   Deliberately no setTimeout cleanup — on DraftPage unmount pushToast becomes a stale
+  //   closure, but React ignores setState on unmounted components, so it's safe.
+  useNotificationPolling((evs: NotificationEvent[]) => {
+    if (evs.length === 0) return;
 
-  // 부상/뎁스 변경 알림 받은 선수 id 집합 — 페이지 떠나기 전까지 row에 빨간 점 표시.
-  const [affectedPlayerIds, setAffectedPlayerIds] = useState<Set<string>>(new Set());
+    const STAGGER_THRESHOLD = 10;
+    const STAGGER_MS = 2000;
 
-  // 15초마다 백엔드 알림 폴링. 새 이벤트마다 toast + affectedPlayerIds 업데이트.
-  // event_type 별로 prefix와 색을 다르게 → 사용자가 한눈에 종류 파악 가능.
-  // 토스트는 8초간 유지 (기본 3.5초보다 길게) 해서 메시지 읽을 시간 확보.
-  useNotificationPolling((ev: NotificationEvent) => {
-    const isInjury = ev.event_type === "INJURY";
-    const isDepth = ev.event_type === "DEPTH";
-    const prefix = isInjury
-      ? "🏥 INJURY UPDATE"
-      : isDepth
-        ? "📊 DEPTH CHART UPDATE"
-        : "🔔 NOTIFICATION";
-    const variant: ToastVariant = isInjury
-      ? "injury"
-      : isDepth
-        ? "depth"
-        : "info";
+    const showOne = (ev: NotificationEvent) => {
+      const { prefix, variant } = notificationDisplay(ev.event_type);
+      pushToast(`${prefix} — ${ev.message}`, variant);
+    };
 
-    pushToast(`${prefix} — ${ev.message}`, variant, 8000);
+    if (evs.length <= STAGGER_THRESHOLD) {
+      for (const ev of evs) showOne(ev);
+      return;
+    }
 
-    setAffectedPlayerIds((prev) => {
-      const next = new Set(prev);
-      next.add(ev.player_id);
-      return next;
+    evs.forEach((ev, i) => {
+      window.setTimeout(() => showOne(ev), i * STAGGER_MS);
     });
   }, authed);
 
-  // Save / Import 모달
+  // Save / Import modals
   const [saveModalOpen, setSaveModalOpen] = useState(false);
   const [saveNameInput, setSaveNameInput] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Rename modal — only for renaming a loaded session.
+  const [renameModalOpen, setRenameModalOpen] = useState(false);
+  const [renameInput, setRenameInput] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameSaving, setRenameSaving] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
 
   const rosterSize = useMemo(
     () => clampRosterSize(config?.rosterPlayers),
     [config?.rosterPlayers]
   );
-  // 옛 세션엔 rosterSlots 가 없을 수 있으므로 기본값 fallback.
+  // Legacy sessions may lack rosterSlots, so fall back to the default.
   const rosterSlotCounts = useMemo(
     () => config?.rosterSlots ?? DEFAULT_ROSTER_SLOTS,
     [config?.rosterSlots]
@@ -262,7 +297,7 @@ export default function DraftPage() {
     [rosterSlotCounts]
   );
 
-  // 공개 선수 목록 + 인증 값 목록을 playerId 로 머지한 최종 UI 목록
+  // Final UI list — merges the public player list with the authenticated value list by playerId
   const allPlayers = useMemo<DraftPlayer[]>(
     () => mergePlayersWithValues(publicPlayers, playerValues),
     [publicPlayers, playerValues]
@@ -283,8 +318,6 @@ export default function DraftPage() {
 
     const sorted = [...result].sort((a, b) => {
       switch (sort) {
-        case "cost_desc":
-          return (b.recommendedBid ?? 0) - (a.recommendedBid ?? 0);
         case "avg_desc":
           return primaryRateSortValue(b) - primaryRateSortValue(a);
         case "hr_desc":
@@ -349,8 +382,14 @@ export default function DraftPage() {
     return calculateCurrentRound(teams.length, rosterSize, picks);
   }, [teams.length, rosterSize, picks]);
 
-  const selectedA = players.find((player) => player.id === compareAId) ?? null;
-  const selectedB = players.find((player) => player.id === compareBId) ?? null;
+  // Changing the position filter can drop the player from the paginated `players`, so we look up against the full list.
+  const selectedA = compareAId ? playersById[compareAId] ?? null : null;
+  const selectedB = compareBId ? playersById[compareBId] ?? null : null;
+
+  // The compare slots / modal / AI all need recommendedBid — prefetch it with a single-player call as soon as a player is selected.
+  // The call is not repeated if the same player is re-selected; A/B clearing resets it to null immediately.
+  const [compareBidA, setCompareBidA] = useState<number | null>(null);
+  const [compareBidB, setCompareBidB] = useState<number | null>(null);
 
   const openAddModal = (player: DraftPlayer) => {
     setAddTarget(player);
@@ -362,13 +401,15 @@ export default function DraftPage() {
 
   const closeAddModal = () => {
     setAddTarget(null);
+    setAddTargetBid(null);
+    setAddTargetBidLoading(false);
   };
 
   const closeTakenModal = () => {
     setTakenTarget(null);
   };
 
-  // 메모 팝오버 — 로드된 세션에서만 사용 가능 (미저장 모드는 버튼 자체가 비활성화됨).
+  // Notes popover — only usable in a loaded session (in unsaved mode the button itself is disabled).
   const openNoteModal = (player: DraftPlayer) => {
     setNoteTarget(player);
   };
@@ -391,14 +432,14 @@ export default function DraftPage() {
         return next;
       });
 
-    // 미저장 모드 — sessionStorage 동기화 effect 가 알아서 잡아가므로 여기서 state만 갱신.
+    // Unsaved mode — the sessionStorage-sync effect picks it up automatically, so just update state here.
     if (sessionId === null) {
       applyLocal();
       setNoteTarget(null);
       return;
     }
 
-    // 저장된 세션 — 즉시 서버에 PUT.
+    // Saved session — PUT to the server immediately.
     setNoteSaving(true);
     apiPutAuth<{ status: string }, { note: string }>(
       `/api/draft/sessions/${sessionId}/notes/${encodeURIComponent(playerId)}`,
@@ -415,8 +456,8 @@ export default function DraftPage() {
       .finally(() => setNoteSaving(false));
   };
 
-  // Start Your Draft 모달에서 입력한 config 로 page state 를 갱신.
-  // sessionStorage 도 함께 저장해 같은 탭에서 이동/새로고침해도 resume 되도록 한다.
+  // Updates page state from the config entered in the Start Your Draft modal.
+  // Also writes to sessionStorage so the draft resumes after navigation/refresh in the same tab.
   const handleSetupSubmit = (next: DraftSetupConfig) => {
     const config: DraftConfigServer = {
       leagueType: next.leagueType,
@@ -426,6 +467,7 @@ export default function DraftPage() {
       opponentsCount: next.opponentsCount,
       oppTeamNames: next.oppTeamNames,
       rosterSlots: next.rosterSlots,
+      targetSeason: next.targetSeason,
     };
     try {
       sessionStorage.setItem(
@@ -433,7 +475,7 @@ export default function DraftPage() {
         JSON.stringify({ config, picks: [], notes: {} } satisfies UnsavedDraft)
       );
     } catch {
-      // 쿼터 초과 등은 조용히 무시.
+      // Silently ignore quota-exceeded and similar errors.
     }
     setConfig(config);
     setTeams(buildTeamsFromConfig(config));
@@ -441,9 +483,11 @@ export default function DraftPage() {
     setNotes({});
     setHasDraftConfig(true);
     setSetupModalOpen(false);
+    // The next useEffect refetches PPA values with the new config — the overlay stays up until that completes.
+    setPendingStartDraft(true);
   };
 
-  // 비로그인이면 로그인 모달, 로그인 상태면 setup 모달.
+  // Logged out → login modal; logged in → setup modal.
   const openStartDraft = () => {
     if (authed) {
       setSetupModalOpen(true);
@@ -452,13 +496,13 @@ export default function DraftPage() {
     }
   };
 
-  // 모든 로컬 상태 / sessionStorage 를 초기화해 "갓 들어온" 상태로 만든 다음
-  // setup 모달을 띄움. 로드 모드였다면 URL 도 /draft 로 바꿔서 사이드 효과 차단.
+  // Reset all local state / sessionStorage back to a "fresh entry" state, then
+  // open the setup modal. If we were in loaded mode, also change the URL to /draft to block side effects.
   const resetToFreshSetup = () => {
     try {
       removeUnsavedDraftStorage();
     } catch {
-      // 무시
+      // ignore
     }
     if (isLoadedMode) {
       navigate("/draft", { replace: true });
@@ -472,10 +516,10 @@ export default function DraftPage() {
     setSetupModalOpen(true);
   };
 
-  // New 버튼 — 현재 드래프트를 정리하고 새로 시작하는 setup 모달을 띄움.
-  //   - 로드된 세션 (isLoadedMode): 이미 DB 에 저장돼 있으니 즉시 setup.
-  //   - 미저장 드래프트: 3-버튼 확인 모달 (Save first / Discard current / Cancel)
-  //     로 분기. Cancel 은 진짜 abort — 드래프트 상태 변경 없음.
+  // New button — clean up the current draft and open the setup modal to start fresh.
+  //   - Loaded session (isLoadedMode): already persisted in the DB, so jump straight into setup.
+  //   - Unsaved draft: branch into a three-button confirm modal (Save first / Discard current / Cancel).
+  //     Cancel is a true abort — no draft state changes.
   const handleNewDraft = () => {
     if (isLoadedMode) {
       resetToFreshSetup();
@@ -496,12 +540,12 @@ export default function DraftPage() {
   };
 
   const handleNewConfirmCancel = () => {
-    // 진짜 cancel — 아무 상태도 변경하지 않음.
+    // True cancel — leave all state untouched.
     setNewConfirmOpen(false);
   };
 
-  // 진행 중인 미저장 draft 폐기 — sessionStorage 비우고 player browser 상태로 복귀.
-  // 저장된 세션(isLoadedMode)은 이 버튼 자체가 노출되지 않으므로 분기 필요 없음.
+  // Discard the in-progress unsaved draft — clears sessionStorage and returns to the player-browser state.
+  // For saved sessions (isLoadedMode) this button isn't shown, so no branching needed.
   const handleDiscardDraft = () => {
     if (!window.confirm("Discard the current draft? This cannot be undone.")) return;
 
@@ -534,9 +578,9 @@ export default function DraftPage() {
     setHasDraftConfig(false);
   };
 
-  // 세션 부트스트랩 + 메모 패치 — 두 useEffect 를 캡슐화한 훅에 위임.
-  // 동작은 100% 동일: 로드 모드는 GET session detail + notes, 미저장 모드는
-  // sessionStorage 에서 resume 또는 DEFAULT_DRAFT_CONFIG 폴백.
+  // Session bootstrap + notes fetch — delegated to a hook that encapsulates both useEffects.
+  // The behavior is identical: loaded mode does GET session detail + notes; unsaved mode
+  // resumes from sessionStorage or falls back to DEFAULT_DRAFT_CONFIG.
   useDraftSessionLoader({
     isLoadedMode,
     sessionId,
@@ -549,9 +593,9 @@ export default function DraftPage() {
     resetPicks,
   });
 
-  // My Team 페이지가 "현재 활성 드래프트 세션" 을 알도록 sessionStorage 에 mirror.
-  // 로드 모드 → 그 sessionId, 미저장(또는 fresh) → null.
-  // → My Team 페이지가 옛 URL ?sessionId 로 잘못된 세션을 보여주는 문제 차단.
+  // Mirror the "currently active draft session" into sessionStorage so the My Team page can see it.
+  // Loaded mode → that sessionId; unsaved (or fresh) → null.
+  // → Prevents My Team from showing the wrong session because of a stale URL ?sessionId.
   useEffect(() => {
     if (isLoadedMode && sessionId !== null) {
       setActiveDraftSessionId(sessionId);
@@ -560,7 +604,7 @@ export default function DraftPage() {
     }
   }, [isLoadedMode, sessionId]);
 
-  // 미저장 모드에서 picks/notes 가 바뀔 때마다 sessionStorage 에도 sync — 페이지 이동/새로고침 보호.
+  // In unsaved mode, sync picks/notes to sessionStorage whenever they change — protects against navigation/refresh.
   useEffect(() => {
     if (isLoadedMode || !bootstrapped || !config || !hasDraftConfig) return;
     try {
@@ -569,12 +613,12 @@ export default function DraftPage() {
         JSON.stringify({ config, picks, notes } satisfies UnsavedDraft)
       );
     } catch {
-      // 쿼터 초과 등은 조용히 무시 — 새로고침 보호 실패해도 화면 동작에는 영향 없음.
+      // Silently ignore quota-exceeded and similar errors — losing refresh protection doesn't affect on-screen behavior.
     }
   }, [isLoadedMode, bootstrapped, config, hasDraftConfig, picks, notes]);
 
-  // 공개 선수 목록 — leagueType 이 바뀌면 다시 불러온다.
-  // AL/NL 은 ?league= 쿼리로 백엔드 필터링, 그 외(custom 등)는 전체.
+  // Public player list — refetched when leagueType changes.
+  // AL/NL filter on the backend via ?league=, everything else (custom, etc.) returns the full list.
   const leagueQuery =
     config?.leagueType === "AL" || config?.leagueType === "NL"
       ? config.leagueType
@@ -610,12 +654,9 @@ export default function DraftPage() {
     return () => controller.abort();
   }, [leagueQuery]);
 
-  // 인증된 사용자에게만 PPA 값 + 추천 bid 를 불러와 playerId 로 공개 목록과 머지한다.
-  // 로그아웃 시 값을 즉시 지워서 UI 에 남지 않도록 함.
-  // picks/config 가 바뀔 때마다 재호출 — 잔여 예산 변동에 따라 백엔드의 추천 bid 가 갱신되기 때문.
-  // hasDraftConfig 는 의도적으로 의존하지 않음 — 로그인만 하면 (Start Draft 누르기 전에도)
-  // PPA 값이 보여야 한다. 드래프트 시작 전엔 config 가 DEFAULT_DRAFT_CONFIG 로 채워져 있어서
-  // 백엔드가 기본 예산/로스터/상대수로 추천 bid 를 계산해 돌려준다.
+  // Fetch PPA values only for authenticated users and merge them into the public list by playerId.
+  // recommendedBid is fetched per-player when the Add modal opens (POST /api/draft/players/bid).
+  // On logout, values are cleared immediately so they don't linger in the UI.
   useEffect(() => {
     if (!authed || !config) {
       queueMicrotask(() => setPlayerValues(null));
@@ -624,26 +665,94 @@ export default function DraftPage() {
 
     const controller = new AbortController();
 
-    apiPostAuth<DraftPlayerValuesResponse, { config: DraftConfigServer; picks: DraftPick[] }>(
-      "/api/draft/players/values",
-      { config, picks },
+    apiGetAuth<DraftPlayerValuesResponse>(
+      "/api/draft/players/value",
       undefined,
-      controller.signal
+      controller.signal,
     )
       .then((data) => {
         if (controller.signal.aborted) return;
         setPlayerValues(data.items ?? []);
+        setPendingStartDraft(false);
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
         console.error(err);
         setPlayerValues(null);
+        setPendingStartDraft(false);
+        pushToast("Failed to load player values. Please try again.", "error");
       });
 
     return () => controller.abort();
-  }, [authed, config, picks]);
+  }, [authed, config]);
+
+  // Each time Compare A changes, fire a single-player bid call — shared by the Compare slots / modal / AI.
+  // Reset in a microtask the instant the selection changes so the old bid isn't mistakenly applied to the new player.
+  // picks is included in the fetch payload but omitted from deps — refetching on every pick would be expensive.
+  useEffect(() => {
+    if (!authed || !config || !compareAId) {
+      queueMicrotask(() => setCompareBidA(null));
+      return;
+    }
+    queueMicrotask(() => setCompareBidA(null));
+    const controller = new AbortController();
+    apiPostAuth<DraftPlayerBid, { playerId: string; config: DraftConfigServer; picks: DraftPick[] }>(
+      "/api/draft/players/bid",
+      { playerId: compareAId, config, picks },
+      undefined,
+      controller.signal,
+    )
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setCompareBidA(res.recommendedBid);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setCompareBidA(null);
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, config, compareAId]);
+
+  useEffect(() => {
+    if (!authed || !config || !compareBId) {
+      queueMicrotask(() => setCompareBidB(null));
+      return;
+    }
+    queueMicrotask(() => setCompareBidB(null));
+    const controller = new AbortController();
+    apiPostAuth<DraftPlayerBid, { playerId: string; config: DraftConfigServer; picks: DraftPick[] }>(
+      "/api/draft/players/bid",
+      { playerId: compareBId, config, picks },
+      undefined,
+      controller.signal,
+    )
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setCompareBidB(res.recommendedBid);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setCompareBidB(null);
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, config, compareBId]);
+
+  // Player object with the bid filled in — ComparisonPanel / PlayerComparisonModal / AI recommendation all share this object.
+  const selectedAWithBid = useMemo(
+    () => (selectedA ? { ...selectedA, recommendedBid: compareBidA } : null),
+    [selectedA, compareBidA],
+  );
+  const selectedBWithBid = useMemo(
+    () => (selectedB ? { ...selectedB, recommendedBid: compareBidB } : null),
+    [selectedB, compareBidB],
+  );
 
   // Toggle player selection for A/B comparison (max 2 players).
+  // Block mixed batter/pitcher comparisons and surface a toast.
   const handleCompareToggle = (playerId: string) => {
     if (!authed) return;
     if (comparisonOpen) setComparisonOpen(false);
@@ -656,6 +765,19 @@ export default function DraftPage() {
 
     if (compareBId === playerId) {
       setCompareBId(null);
+      return;
+    }
+
+    const candidate = playersById[playerId];
+    if (!candidate) return;
+    const counterpart = !compareAId
+      ? selectedB
+      : !compareBId
+        ? selectedA
+        : selectedA; // If both slots are filled, B gets replaced → it must be comparable with A
+
+    if (counterpart && !arePlayersComparable(candidate, counterpart)) {
+      pushToast("Batters and pitchers cannot be compared together.", "error");
       return;
     }
 
@@ -702,38 +824,56 @@ export default function DraftPage() {
     setProfilePlayerId(null);
   };
 
-  // 픽 제거 — 서버 호출 없이 React state 만 갱신. 미저장 모드면 localStorage sync 는 별도 effect 에서.
+  // Remove a pick — no server call, only React state updates. localStorage sync in unsaved mode is handled in a separate effect.
   const handleRemovePick = (pick: DraftPick) => {
     commitPicks((prev) => prev.filter((p) => p.playerId !== pick.playerId));
   };
 
-  // 내 팀 보드 안에서 드래그로 슬롯을 옮길 때:
-  //   - 메인: 자격(isEligibleForSlot) 검사 후 이동/스왑.
-  //   - 마이너/택시: 포지션 자격이 없으니 순수 재정렬(스왑/빈자리 이동).
-  // kind 는 어느 보드의 슬롯을 만지는지 — 같은 kind 내에서만 인덱스 충돌이 발생.
-  // teamId 는 재배치가 일어난 팀 — 내 팀뿐 아니라 opponent 팀의 픽도 사용자가 직접 정리 가능.
+  // When drag-and-drop moves a slot/team:
+  //  - Same team: main requires eligibility check before moving/swapping; minors/taxi are pure reordering.
+  //  - Different team: only allowed on an empty slot + eligibility (main). If occupied, show a toast instead of swapping.
   const handleSlotReassign = (
+    fromTeamId: string,
     fromIndex: number,
+    toTeamId: string,
     toIndex: number,
     kind: DraftPickKind,
-    teamId: string,
   ) => {
-    if (fromIndex === toIndex) return;
+    if (fromTeamId === toTeamId && fromIndex === toIndex) return;
 
-    const teamPicks = picks.filter(
-      (p) => p.draftedByTeamId === teamId && p.kind === kind
+    const fromTeamPicks = picks.filter(
+      (p) => p.draftedByTeamId === fromTeamId && p.kind === kind
     );
-    const fromPick = teamPicks.find((p) => p.slotIndex === fromIndex);
+    const fromPick = fromTeamPicks.find((p) => p.slotIndex === fromIndex);
     if (!fromPick) return;
-    const toPick = teamPicks.find((p) => p.slotIndex === toIndex);
 
-    // 마이너/택시: 자격 검사 없이 그냥 스왑/이동.
+    const toTeamPicks = picks.filter(
+      (p) => p.draftedByTeamId === toTeamId && p.kind === kind
+    );
+    const toPick = toTeamPicks.find((p) => p.slotIndex === toIndex);
+    const isCrossTeam = fromTeamId !== toTeamId;
+
+    // Cross-team move: don't swap if occupied — show a toast instead.
+    if (isCrossTeam && toPick) {
+      const targetTeam = teams.find((t) => t.id === toTeamId);
+      pushToast(
+        `${targetTeam?.name ?? "Target team"} already has a player in that slot.`,
+        "error",
+      );
+      return;
+    }
+
+    // Minors/taxi: handle without an eligibility check.
     if (kind !== "main") {
       commitPicks((prev) =>
         prev.map((p) => {
           if (p.kind !== kind) return p;
-          if (p.playerId === fromPick.playerId) return { ...p, slotIndex: toIndex };
-          if (toPick && p.playerId === toPick.playerId) return { ...p, slotIndex: fromIndex };
+          if (p.playerId === fromPick.playerId) {
+            return { ...p, slotIndex: toIndex, draftedByTeamId: toTeamId };
+          }
+          if (toPick && p.playerId === toPick.playerId) {
+            return { ...p, slotIndex: fromIndex };
+          }
           return p;
         })
       );
@@ -752,7 +892,24 @@ export default function DraftPage() {
       return;
     }
 
-    // Empty target → simple move.
+    // Cross-team move (empty-slot check already done above): swap teamId + slotIndex + slotPos.
+    if (isCrossTeam) {
+      commitPicks((prev) =>
+        prev.map((p) =>
+          p.playerId === fromPick.playerId
+            ? {
+                ...p,
+                slotIndex: toIndex,
+                slotPos: toSlotPos as DraftPosition,
+                draftedByTeamId: toTeamId,
+              }
+            : p
+        )
+      );
+      return;
+    }
+
+    // Same team — empty target → simple move.
     if (!toPick) {
       commitPicks((prev) =>
         prev.map((p) =>
@@ -764,7 +921,7 @@ export default function DraftPage() {
       return;
     }
 
-    // Occupied target → swap only when both directions are eligible.
+    // Same team — occupied target → swap only when both directions are eligible.
     const toPlayer = playersById[toPick.playerId];
     if (!toPlayer) return;
     if (!isEligibleForSlot(toPlayer.positions, fromSlotPos)) {
@@ -787,16 +944,17 @@ export default function DraftPage() {
     );
   };
 
-  // 픽 추가 시 클라이언트가 즉시 slotIndex 결정.
-  // 같은 playerId 의 기존 픽은 제외 → 같은 팀+kind occupied 슬롯 집합 → 빈 슬롯 찾기.
-  // 메인은 포지션 자격 매칭, 마이너/택시는 그냥 첫 빈 자리.
-  // -1 이면 자리 없음 알림 후 종료.
+  // When adding a pick, the client decides slotIndex immediately.
+  // Drop any existing pick with the same playerId → build the set of occupied slots for the same team+kind → find an empty slot.
+  // Main uses positional eligibility; minors/taxi just take the first empty slot.
+  // -1 means no spot is available — notify and bail.
   const addPickToState = (
     playerId: string,
     draftedByTeamId: string,
     bid: number | null,
     type: DraftPick["type"],
-    kind: DraftPickKind
+    kind: DraftPickKind,
+    contractCode: ContractCode | null = null,
   ) => {
     const filtered = picks.filter((p) => p.playerId !== playerId);
     const occupied = new Set(
@@ -805,6 +963,10 @@ export default function DraftPage() {
         .map((p) => p.slotIndex)
     );
     const player = playersById[playerId];
+
+    // signedSeason is pinned to the current session's targetSeason (the anchor for rollover).
+    // Without a contractCode, signedSeason is meaningless, so null it out too.
+    const signedSeason = contractCode ? config?.targetSeason ?? null : null;
 
     if (kind !== "main") {
       const slotIndex = findFirstEmptySlot(occupied, MINOR_TAXI_SLOT_COUNT);
@@ -823,6 +985,8 @@ export default function DraftPage() {
         bid: null,
         type,
         kind,
+        contractCode: null,
+        signedSeason: null,
       };
       commitPicks([...filtered, next]);
       return true;
@@ -850,12 +1014,14 @@ export default function DraftPage() {
       bid,
       type,
       kind: "main",
+      contractCode,
+      signedSeason,
     };
     commitPicks([...filtered, next]);
     return true;
   };
 
-  // Add 버튼 클릭 — 메인이면 bid 모달, 마이너/택시는 바로 추가.
+  // Add button click — main opens the bid modal (and fetches a single-player bid on open); minors/taxi add directly.
   const handleAddClick = (player: DraftPlayer) => {
     if (boardView !== "main") {
       if (!myTeam) return;
@@ -864,12 +1030,25 @@ export default function DraftPage() {
       }
       return;
     }
+    if (!config) return;
     openAddModal(player);
+    setAddTargetBid(null);
+    setAddTargetBidLoading(true);
+    apiPostAuth<DraftPlayerBid, { playerId: string; config: DraftConfigServer; picks: DraftPick[] }>(
+      "/api/draft/players/bid",
+      { playerId: player.id, config, picks },
+    )
+      .then((res) => setAddTargetBid(res.recommendedBid))
+      .catch((err: unknown) => {
+        console.error(err);
+        setAddTargetBid(null);
+      })
+      .finally(() => setAddTargetBidLoading(false));
   };
 
-  const handleAddFinish = (bid: number) => {
+  const handleAddFinish = (bid: number, contractCode: ContractCode) => {
     if (!addTarget || !myTeam) return;
-    if (!addPickToState(addTarget.id, myTeam.id, bid, "mine", "main")) return;
+    if (!addPickToState(addTarget.id, myTeam.id, bid, "mine", "main", contractCode)) return;
     closeAddModal();
     draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
@@ -881,17 +1060,122 @@ export default function DraftPage() {
     draftRoomTopRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  // ── Save 버튼 핸들러 ──
+  // ── Save button handler ──
   const openSaveModal = () => {
     setSaveNameInput(initialNameFor(sessionName));
     setSaveError(null);
     setSaveModalOpen(true);
   };
 
+  // Save button — for a loaded session, skip the name prompt and PUT immediately; toast on success.
+  // Unsaved (new) mode keeps the existing flow and opens SaveSessionModal.
+  const handleSaveClick = () => {
+    if (!isLoadedMode || sessionId === null || !config || !sessionName) {
+      openSaveModal();
+      return;
+    }
+    setSaving(true);
+    apiPutAuth<SessionDetail, { name: string; picks: DraftPick[] }>(
+      `/api/draft/sessions/${sessionId}`,
+      { name: sessionName, picks },
+    )
+      .then((data) => {
+        setSessionName(data.name);
+        pushToast("Session saved.", "success");
+      })
+      .catch((err: unknown) => {
+        console.error(err);
+        pushToast(
+          err instanceof Error ? `Save failed: ${err.message}` : "Save failed.",
+          "error",
+        );
+      })
+      .finally(() => setSaving(false));
+  };
+
+  // Pencil icon → rename modal.
+  const openRenameModal = () => {
+    setRenameInput(sessionName ?? "");
+    setRenameError(null);
+    setRenameModalOpen(true);
+  };
+
+  const closeRenameModal = () => {
+    if (renameSaving) return;
+    setRenameModalOpen(false);
+    setRenameError(null);
+  };
+
+  const handleRenameConfirm = () => {
+    if (sessionId === null) return;
+    const next = renameInput.trim();
+    if (!next) {
+      setRenameError("Name cannot be empty");
+      return;
+    }
+    if (next === sessionName) {
+      // No change — just close.
+      setRenameModalOpen(false);
+      return;
+    }
+    setRenameSaving(true);
+    setRenameError(null);
+    apiPutAuth<SessionDetail, { name: string; picks: DraftPick[] }>(
+      `/api/draft/sessions/${sessionId}`,
+      { name: next, picks },
+    )
+      .then((data) => {
+        setSessionName(data.name);
+        setRenameModalOpen(false);
+        pushToast("Session renamed.", "success");
+      })
+      .catch((err: unknown) => {
+        console.error(err);
+        setRenameError(err instanceof Error ? err.message : "Rename failed");
+      })
+      .finally(() => setRenameSaving(false));
+  };
+
+  // In a loaded session, picks changes trigger a 500ms-debounced background PUT.
+  // Purpose: ensure MyTeam sees the latest picks when it queries the DB (real-time sync).
+  // Skip the moment when bootstrap is setting picks on first mount / right after a session switch.
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const skipFirstAutoSaveRef = useRef(true);
+
+  useEffect(() => {
+    skipFirstAutoSaveRef.current = true;
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!isLoadedMode || sessionId === null || !config || !sessionName) return;
+    if (skipFirstAutoSaveRef.current) {
+      skipFirstAutoSaveRef.current = false;
+      return;
+    }
+    if (autoSaveTimerRef.current !== null) {
+      window.clearTimeout(autoSaveTimerRef.current);
+    }
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      apiPutAuth<SessionDetail, { name: string; picks: DraftPick[] }>(
+        `/api/draft/sessions/${sessionId}`,
+        { name: sessionName, picks },
+      ).catch((err: unknown) => {
+        console.error("Auto-save failed:", err);
+      });
+      autoSaveTimerRef.current = null;
+    }, 500);
+    return () => {
+      if (autoSaveTimerRef.current !== null) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+    };
+  }, [picks, isLoadedMode, sessionId, sessionName, config]);
+
   const closeSaveModal = () => {
     setSaveModalOpen(false);
     setSaveError(null);
-    // 사용자가 Save 를 취소하면 chained post-save action 도 함께 폐기.
+    // If the user cancels Save, also discard any chained post-save action.
     setPostSaveAction(null);
   };
 
@@ -913,12 +1197,12 @@ export default function DraftPage() {
       )
         .then((data) => {
           setSessionName(data.name);
-          // closeSaveModal 은 postSaveAction 도 클리어하므로, chain 동작이
-          // 예약돼 있었다면 그 사실을 먼저 캡처한 뒤 닫는다.
+          // closeSaveModal also clears postSaveAction, so capture any scheduled
+          // chained action first, then close.
           const chained = postSaveAction;
           closeSaveModal();
           if (chained === "setup") {
-            // 저장된 세션을 그대로 두고 새 setup 으로 이동.
+            // Leave the saved session intact and move on to a fresh setup.
             resetToFreshSetup();
           }
         })
@@ -935,8 +1219,8 @@ export default function DraftPage() {
       { name, config, picks }
     )
       .then(async (data) => {
-        // 미저장 동안 쌓인 로컬 메모를 새 session_id 로 일괄 PUT.
-        // 개별 실패는 무시 — 메모는 부수 데이터이고, 세션 자체는 이미 성공했음.
+        // Bulk-PUT any local notes accumulated during unsaved mode against the new session_id.
+        // Individual failures are ignored — notes are auxiliary data and the session itself already saved successfully.
         const noteEntries = Object.entries(notes);
         if (noteEntries.length > 0) {
           await Promise.all(
@@ -954,15 +1238,15 @@ export default function DraftPage() {
         try {
           removeUnsavedDraftStorage();
         } catch {
-          // 무시
+          // ignore
         }
         setSaving(false);
         setSaveModalOpen(false);
 
         if (postSaveAction === "setup") {
-          // "New" 흐름에서 Yes-save 를 거친 경우 — 새로 만든 세션 URL 로
-          // 이동하지 않고, 곧바로 새 setup 모달을 띄운다. (세션은 DB 에
-          // 저장돼 있으므로 추후 Import 에서 다시 열 수 있다.)
+          // We came through the "New" → Yes-save flow — don't navigate to the newly
+          // created session's URL; open a fresh setup modal directly. (The session
+          // is already persisted in the DB and can be reopened later via Import.)
           setPostSaveAction(null);
           resetToFreshSetup();
         } else {
@@ -980,9 +1264,14 @@ export default function DraftPage() {
       });
   };
 
-  // ── Import 모달 핸들러 ──
+  // ── Import modal handlers ──
   const [sessionList, setSessionList] = useState<SessionSummary[]>([]);
   const [sessionListLoading, setSessionListLoading] = useState(false);
+  // Copy flow: clicking the Copy button opens a rename modal; Confirm actually issues the POST.
+  const [copyTarget, setCopyTarget] = useState<{ id: number } | null>(null);
+  const [copyNameInput, setCopyNameInput] = useState("");
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [copySaving, setCopySaving] = useState(false);
 
   const refreshSessionList = () => {
     setSessionListLoading(true);
@@ -1009,11 +1298,84 @@ export default function DraftPage() {
     navigate(`/draft/${id}`);
   };
 
+  // Copy button click: open the rename modal. The actual POST happens in handleCopyConfirm.
+  const handleSessionCopy = (id: number) => {
+    const source = sessionList.find((s) => s.id === id);
+    setCopyTarget({ id });
+    setCopyNameInput(source ? `${source.name} (Copy)` : "Copied Draft");
+    setCopyError(null);
+  };
+
+  const closeCopyModal = () => {
+    if (copySaving) return;
+    setCopyTarget(null);
+    setCopyNameInput("");
+    setCopyError(null);
+  };
+
+  // Confirm: load the source session + notes → POST a new session under the user-entered name.
+  const handleCopyConfirm = () => {
+    if (copyTarget === null) return;
+    const name = copyNameInput.trim();
+    if (!name) {
+      setCopyError("Name is required");
+      return;
+    }
+    const sourceId = copyTarget.id;
+    setCopySaving(true);
+    setCopyError(null);
+
+    apiGetAuth<SessionDetail>(`/api/draft/sessions/${sourceId}`)
+      .then(async (original) => {
+        const notesResp = await apiGetAuth<{ items: { playerId: string; note: string }[] }>(
+          `/api/draft/sessions/${sourceId}/notes`,
+        ).catch(() => ({ items: [] }));
+
+        const created = await apiPostAuth<
+          SessionDetail,
+          { name: string; config: DraftConfigServer; picks: DraftPick[] }
+        >("/api/draft/sessions", {
+          name,
+          config: original.config,
+          picks: original.picks,
+        });
+
+        if (notesResp.items.length > 0) {
+          await Promise.all(
+            notesResp.items.map((n) =>
+              apiPutAuth<{ status: string }, { note: string }>(
+                `/api/draft/sessions/${created.id}/notes/${encodeURIComponent(n.playerId)}`,
+                { note: n.note },
+              ).catch((err: unknown) => {
+                console.error(`Failed to copy note for ${n.playerId}:`, err);
+              }),
+            ),
+          );
+        }
+
+        setCopySaving(false);
+        setCopyTarget(null);
+        setCopyNameInput("");
+        pushToast(`Copied as "${created.name}".`, "success");
+        refreshSessionList();
+      })
+      .catch((err: unknown) => {
+        console.error(err);
+        setCopySaving(false);
+        const msg = err instanceof Error ? err.message : "";
+        if (msg.includes("Maximum")) {
+          setCopyError("Reached max session count. Delete one and try again.");
+        } else {
+          setCopyError(msg || "Copy failed");
+        }
+      });
+  };
+
   const handleSessionDelete = (id: number) => {
     if (!confirm("Delete this session?")) return;
     apiDeleteAuth<{ status: string; sessionId: number }>(`/api/draft/sessions/${id}`)
       .then(() => {
-        // 현재 활성 세션 삭제 시 홈으로 리다이렉트
+        // If the currently active session is deleted, redirect home
         if (isLoadedMode && sessionId === id) {
           closeImportModal();
           navigate("/", { replace: true });
@@ -1051,9 +1413,10 @@ export default function DraftPage() {
         onRedo={redoPicks}
         onDiscard={handleDiscardDraft}
         onNew={handleNewDraft}
-        onSave={openSaveModal}
+        onSave={handleSaveClick}
         onImport={openImportModal}
         onStartDraft={openStartDraft}
+        onRename={openRenameModal}
       />
 
       <FadeIn delayMs={60}>
@@ -1071,6 +1434,7 @@ export default function DraftPage() {
               onViewChange={setBoardView}
               onRemovePick={handleRemovePick}
               onSlotReassign={handleSlotReassign}
+              onOpenHistory={() => setHistoryModalOpen(true)}
             />
           ) : (
             <section className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
@@ -1107,17 +1471,23 @@ export default function DraftPage() {
         }}
         hasDraftConfig={hasDraftConfig}
         remainingBudget={remainingBudget}
-        onOpenCustomizeStats={() => setCustomizeStatsOpen(true)}
       />
 
       <ComparisonPanel
-        selectedA={selectedA}
-        selectedB={selectedB}
+        selectedA={selectedAWithBid}
+        selectedB={selectedBWithBid}
         authed={authed}
         onClearA={clearCompareA}
         onClearB={clearCompareB}
         onClearAll={clearCompare}
         onOpenComparison={() => setComparisonOpen(true)}
+      />
+
+      <StatPickerStrip
+        group={showingPitcherColumns ? "pitcher" : "batter"}
+        cols={showingPitcherColumns ? pitcherCols : batterCols}
+        onChange={showingPitcherColumns ? setPitcherCols : setBatterCols}
+        onReset={() => resetStatColumns(showingPitcherColumns ? "pitcher" : "batter")}
       />
 
       <PlayerListTable
@@ -1136,7 +1506,6 @@ export default function DraftPage() {
         authed={authed}
         hasDraftConfig={hasDraftConfig}
         notes={notes}
-        affectedPlayerIds={affectedPlayerIds}
         compareAId={compareAId}
         compareBId={compareBId}
         onAddPick={handleAddClick}
@@ -1152,6 +1521,8 @@ export default function DraftPage() {
           open={true}
           player={addTarget}
           remainingBudget={remainingBudget}
+          recommendedBid={addTargetBid}
+          bidLoading={addTargetBidLoading}
           onClose={closeAddModal}
           onConfirm={handleAddFinish}
         />
@@ -1171,9 +1542,9 @@ export default function DraftPage() {
       )}
 
       <PlayerComparisonModal
-        open={comparisonOpen && Boolean(selectedA) && Boolean(selectedB)}
-        playerA={selectedA}
-        playerB={selectedB}
+        open={comparisonOpen && Boolean(selectedAWithBid) && Boolean(selectedBWithBid)}
+        playerA={selectedAWithBid}
+        playerB={selectedBWithBid}
         onClose={() => setComparisonOpen(false)}
       />
 
@@ -1183,18 +1554,6 @@ export default function DraftPage() {
         playerType={profilePlayerType}
         onClose={closePlayerInfo}
       />
-
-      {customizeStatsOpen && (
-        <CustomizeStatsModal
-          onClose={() => setCustomizeStatsOpen(false)}
-          batterCols={batterCols}
-          pitcherCols={pitcherCols}
-          onSave={(group, cols) => {
-            if (group === "batter") setBatterCols(cols);
-            else setPitcherCols(cols);
-          }}
-        />
-      )}
 
       {noteTarget && (
         <PlayerNotePopover
@@ -1222,6 +1581,20 @@ export default function DraftPage() {
         />
       )}
 
+      {renameModalOpen && (
+        <RenameSessionModal
+          nameInput={renameInput}
+          onChangeName={(next) => {
+            setRenameInput(next);
+            if (renameError) setRenameError(null);
+          }}
+          error={renameError}
+          saving={renameSaving}
+          onCancel={closeRenameModal}
+          onConfirm={handleRenameConfirm}
+        />
+      )}
+
       {importModalOpen && (
         <ImportSessionsModal
           sessions={sessionList}
@@ -1229,6 +1602,18 @@ export default function DraftPage() {
           onClose={closeImportModal}
           onPick={handleSessionPick}
           onDelete={handleSessionDelete}
+          onCopy={handleSessionCopy}
+        />
+      )}
+
+      {copyTarget !== null && (
+        <CopySessionModal
+          nameInput={copyNameInput}
+          onChangeName={setCopyNameInput}
+          error={copyError}
+          copying={copySaving}
+          onCancel={closeCopyModal}
+          onConfirm={handleCopyConfirm}
         />
       )}
 
@@ -1254,7 +1639,46 @@ export default function DraftPage() {
         onAuthSuccess={() => setSetupModalOpen(true)}
       />
 
+      <OrderedDraftHistoryModal
+        open={historyModalOpen}
+        picks={picks}
+        teams={teams}
+        playersById={playersById}
+        onClose={() => setHistoryModalOpen(false)}
+      />
+
       <Toast toasts={toasts} onDismiss={dismissToast} />
+
+      {pendingStartDraft && (
+        <div className="fixed inset-0 z-100 grid place-items-center bg-black/50 backdrop-blur-md">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/15 bg-[#0c1220] px-6 py-5 shadow-2xl">
+            <svg
+              className="h-5 w-5 animate-spin text-white/80"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <circle
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="3"
+                className="opacity-25"
+              />
+              <path
+                d="M4 12a8 8 0 0 1 8-8"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+              />
+            </svg>
+            <div className="text-sm font-black text-white">
+              Loading player values...
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

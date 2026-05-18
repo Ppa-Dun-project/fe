@@ -70,7 +70,16 @@ type PlayerDetailResponse = {
   headshotUrl?: string | null;
   batterStats?: BatterStats | null;
   pitcherStats?: PitcherStats | null;
+  // This player's depth-chart order within the MLB team's (team, position). 1=starter. null=unknown.
+  depth_order?: number | null;
 };
+
+function formatDepthOrder(order: number | null | undefined): { value: string; label: string } {
+  if (order === null || order === undefined) return { value: "—", label: "Unknown" };
+  if (order === 1) return { value: "1", label: "Starter" };
+  if (order === 2) return { value: "2", label: "Backup" };
+  return { value: String(order), label: "Reserve" };
+}
 
 const HITTER_POSITIONS = new Set([
   "C",
@@ -128,7 +137,7 @@ export default function PlayerInfoModal({ open, playerId, playerType = "batter",
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
-  // 상세 API 단일 호출 — 응답에 valueScore 가 이미 포함되어 있으므로 별도 /value 호출은 불필요.
+  // Single call to the detail API — the response already includes valueScore, so a separate /value call isn't needed.
   useEffect(() => {
     if (!open || playerId === null) return;
 
@@ -253,6 +262,29 @@ export default function PlayerInfoModal({ open, playerId, playerType = "batter",
             </section>
 
             <section>
+              <div className="mb-2 text-sm font-black uppercase tracking-wide text-white/55">Depth Chart</div>
+              {(() => {
+                const depth = formatDepthOrder(detail.depth_order);
+                const knownDepth = detail.depth_order !== null && detail.depth_order !== undefined;
+                return (
+                  <div className="flex items-center gap-4 rounded-xl border border-white/10 bg-[#0f1424] p-4">
+                    <div className="grid h-16 w-16 place-items-center rounded-2xl border border-emerald-400/30 bg-emerald-500/10 text-3xl font-black text-emerald-300">
+                      {depth.value}
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-base font-black text-white">{depth.label}</div>
+                      <div className="mt-0.5 text-xs text-white/55">
+                        {knownDepth
+                          ? `${detail.team} ${detail.positions[0] ?? ""} depth order`.trim()
+                          : "Depth order not available for this player."}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+            </section>
+
+            <section>
               <div className="mb-2 text-sm font-black uppercase tracking-wide text-white/55">
                 Season Stats ({detail.playerType === "pitcher" ? "Pitching" : "Batting"})
               </div>
@@ -294,13 +326,6 @@ export default function PlayerInfoModal({ open, playerId, playerType = "batter",
                     </tr>
                   </tbody>
                 </table>
-              </div>
-            </section>
-
-            <section>
-              <div className="mb-2 text-sm font-black uppercase tracking-wide text-white/55">Career History (MLB)</div>
-              <div className="rounded-xl border border-white/10 bg-[#0f1424] p-4 text-sm text-white/70">
-                Planned for development in V2.
               </div>
             </section>
 

@@ -35,7 +35,6 @@ export const DEFAULT_POSITION_FILTERS: DraftPositionFilter[] = [
 
 export const BATTER_SORT_OPTIONS: { value: DraftSort; label: string }[] = [
   { value: "score_desc", label: "By Score" },
-  { value: "cost_desc",  label: "By Draft Cost" },
   { value: "avg_desc",   label: "By AVG" },
   { value: "hr_desc",    label: "By HR" },
   { value: "rbi_desc",   label: "By RBI" },
@@ -44,7 +43,6 @@ export const BATTER_SORT_OPTIONS: { value: DraftSort; label: string }[] = [
 
 export const PITCHER_SORT_OPTIONS: { value: DraftSort; label: string }[] = [
   { value: "score_desc", label: "By Score" },
-  { value: "cost_desc",  label: "By Draft Cost" },
   { value: "avg_desc",   label: "By ERA" },
   { value: "hr_desc",    label: "By SO" },
   { value: "rbi_desc",   label: "By W" },
@@ -57,17 +55,17 @@ export type DraftPlayersResponse = { items: DraftPlayerPublic[] };
 export type DraftPlayerValuesResponse = { items: DraftPlayerValue[] };
 export type SessionsListResponse = { items: SessionSummary[] };
 
-// sessionStorage 페이로드 — DraftSetupCard 가 쓰고 DraftPage 가 읽는다.
-// 같은 탭에서 페이지 이동/새로고침 동안만 유지, 창을 닫으면 사라짐.
+// sessionStorage payload — written by DraftSetupCard and read by DraftPage.
+// Persists across navigation/refresh within the same tab only; cleared when the window is closed.
 export type UnsavedDraft = {
   config: DraftConfigServer;
   picks: DraftPick[];
-  notes?: Record<string, string>; // playerId → note (저장 전 클라이언트 보관)
+  notes?: Record<string, string>; // playerId → note (client-side storage before save)
 };
 
 // ── Filtering / predicates ────────────────────────────────────────────
 
-// 모든 필터는 정확한 포지션 일치 — UTIL 칩은 "UTIL 자격" 보유 선수만 골라낸다.
+// All filters require an exact position match — the UTIL chip selects only players who are UTIL-eligible.
 export function matchesPositionFilter(
   playerPositions: readonly string[] | undefined,
   filter: DraftPositionFilter,
@@ -83,6 +81,16 @@ export function isPitcherOnly(player: DraftPlayerPublic): boolean {
 
 export function isPitcherPositionFilter(filter: DraftPositionFilter): boolean {
   return filter === "SP" || filter === "RP";
+}
+
+// Compare feature — only allows comparisons within the same category.
+// Batters/catchers/utility players all have playerType !== "pitcher", so they form one group.
+// SP/RP belong to the playerType === "pitcher" group.
+export function arePlayersComparable(
+  a: DraftPlayerPublic,
+  b: DraftPlayerPublic,
+): boolean {
+  return isPitcherOnly(a) === isPitcherOnly(b);
 }
 
 // ── Formatters ────────────────────────────────────────────────────────
@@ -127,12 +135,12 @@ export function removeUnsavedDraftStorage() {
   localStorage.removeItem(UNSAVED_DRAFT_KEY);
 }
 
-// "현재 드래프트 페이지에서 보고 있는 세션 id" 를 페이지 간에 공유.
-// My Team 페이지가 이를 우선 source-of-truth 로 써서 stale URL ?sessionId
-// 때문에 옛 세션의 픽을 보여주는 문제를 막는다.
-//   - 로드 모드 (/draft/:id) 진입 → setActiveDraftSessionId(id)
-//   - 미저장 모드 / discard 후 빈 상태 / "New" 후 reset → setActiveDraftSessionId(null)
-//   - 미저장을 저장(POST) 한 직후 → setActiveDraftSessionId(newId)
+// Shares "the session id currently being viewed on the draft page" across pages.
+// The My Team page treats this as the primary source-of-truth, which prevents it from
+// showing picks from an old session due to a stale URL ?sessionId.
+//   - Entering loaded mode (/draft/:id) → setActiveDraftSessionId(id)
+//   - Unsaved mode / empty state after discard / reset after "New" → setActiveDraftSessionId(null)
+//   - Immediately after saving (POST) an unsaved draft → setActiveDraftSessionId(newId)
 const ACTIVE_DRAFT_SESSION_KEY = "ppadun_active_draft_session_id";
 
 export function setActiveDraftSessionId(id: number | null) {
@@ -140,7 +148,7 @@ export function setActiveDraftSessionId(id: number | null) {
     if (id === null) sessionStorage.removeItem(ACTIVE_DRAFT_SESSION_KEY);
     else sessionStorage.setItem(ACTIVE_DRAFT_SESSION_KEY, String(id));
   } catch {
-    // quota / privacy mode — 무시
+    // quota / privacy mode — ignore
   }
 }
 
@@ -170,8 +178,8 @@ export function readUnsavedDraftStorage(): string | null {
 
 // ── Data shaping ──────────────────────────────────────────────────────
 
-// 미저장 모드에서 config 만으로 teams 배열을 만든다.
-// 저장 시 서버가 자체 ID 로 다시 만들어 주므로 여기 ID 는 클라이언트 임시 키.
+// In unsaved mode, builds the teams array purely from the config.
+// On save, the server regenerates these with its own IDs, so the IDs here are just client-side temporary keys.
 export function buildTeamsFromConfig(config: DraftConfigServer): DraftTeam[] {
   const teams: DraftTeam[] = [
     { id: "team-0", name: config.myTeamName, isMine: true },
@@ -197,12 +205,12 @@ export function normalizeDraftPicks(picks: DraftPick[]): DraftPick[] {
   return picks.map((pick) => ({
     ...pick,
     draftedByTeamId: normalizeDraftTeamId(pick.draftedByTeamId),
-    // 옛 localStorage / 세션엔 kind 가 없을 수 있어 main 폴백.
+    // Older localStorage / sessions may not have `kind`, so fall back to "main".
     kind: pick.kind ?? "main",
   }));
 }
 
-// 공개 선수 목록과 인증 값 목록을 playerId 기준으로 머지
+// Merges the public players list with the authenticated values list by playerId.
 export function mergePlayersWithValues(
   publicPlayers: DraftPlayerPublic[],
   values: DraftPlayerValue[] | null,
@@ -212,13 +220,11 @@ export function mergePlayersWithValues(
   const valueById = new Map(values.map((v) => [v.playerId, v]));
   return publicPlayers.map((player) => {
     const v = valueById.get(player.id);
-    return v
-      ? { ...player, ppaValue: v.ppaValue, recommendedBid: v.recommendedBid }
-      : { ...player };
+    return v ? { ...player, ppaValue: v.ppaValue } : { ...player };
   });
 }
 
-// "Untitled Draft" 같은 자동 이름은 Save 모달에서 빈 입력으로 시작해야 한다.
+// Auto-generated names like "Untitled Draft" should start as an empty input in the Save modal.
 export function initialNameFor(currentName: string | null): string {
   if (!currentName) return "";
   if (currentName === "Untitled Draft") return "";

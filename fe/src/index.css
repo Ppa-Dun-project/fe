@@ -9,7 +9,7 @@ html, body, #root {
 }
 
 body {
-  /* ✅ Vite 기본 템플릿의 center 정렬 제거 */
+  /* Removes the center alignment that ships in Vite's default template. */
   min-width: 320px;
   min-height: 100vh;
   background: #000;
@@ -19,7 +19,7 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ✅ 링크/버튼 기본값은 Tailwind로 컨트롤할 거라 최소만 */
+/* Keep link/button defaults minimal — the rest is controlled by Tailwind. */
 a {
   color: inherit;
   text-decoration: none;

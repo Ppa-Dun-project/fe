@@ -7,7 +7,7 @@ type Props = PropsWithChildren<{
   title?: string;
   onClose: () => void;
   footer?: React.ReactNode;
-  // 기본 max-w-2xl. "large"는 max-w-4xl — 좌우 두 컬럼 레이아웃에 적합.
+  // Default is max-w-2xl. "large" is max-w-4xl — suitable for two-column layouts.
   size?: Size;
 }>;
 
@@ -56,10 +56,13 @@ export default function Modal({
             {title && <h3 className="text-lg font-semibold text-white">{title}</h3>}
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="rounded-lg border border-white/10 px-2 py-1 text-xs text-white/80 hover:bg-white/5 transition"
+            aria-label="Close"
+            title="Close (Esc)"
+            className="grid h-7 w-7 place-items-center rounded-lg border border-white/10 text-sm text-white/80 hover:bg-white/5 transition"
           >
-            ESC
+            ✕
           </button>
         </div>
 
