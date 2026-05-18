@@ -142,17 +142,17 @@ export default function HomePage() {
         </section>
       </FadeIn>
 
-      {/* 뉴스 + 부상 선수 2열 그리드 */}
+      {/* 뉴스 + 부상 선수 2열 그리드 — items-stretch 로 두 카드 세로 길이 동일하게. */}
       {/* grid-cols-1: 기본 1열 / lg:grid-cols-3: 큰 화면에서 3열 */}
-      <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
+      <div className="grid grid-cols-1 items-stretch gap-6 lg:grid-cols-3">
         {/* 좌측 뉴스 섹션 (3열 중 2열 차지) */}
-        <FadeIn className="lg:col-span-2" delayMs={60}>
-          <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
+        <FadeIn className="lg:col-span-2 h-full" delayMs={60}>
+          <section className="flex h-full flex-col rounded-3xl border border-white/10 bg-white/5 p-6">
             <div className="flex items-end justify-between gap-3">
               <div>
                 <h2 className="text-lg font-bold text-white">Latest News</h2>
                 <p className="mt-1 text-xs text-white/50">
-                  Fetched from Yahoo Sports · refreshes every hour
+                  Fetched from Yahoo Sports · refreshes every 10 minutes
                 </p>
               </div>
               {/* "모두 보기" 버튼 → Yahoo Sports MLB 뉴스 페이지로 외부 이동 */}
@@ -167,7 +167,7 @@ export default function HomePage() {
             </div>
 
             {/* 뉴스 카드 3개 렌더링 (배열.map으로 반복) */}
-            <div className="mt-5 grid grid-cols-1 gap-4">
+            <div className="mt-5 flex-1 space-y-4">
               {news.map((item) => (
                 // key: React가 리스트 항목을 식별하기 위한 고유값 (필수)
                 <NewsCard key={item.id} item={item} />
@@ -176,8 +176,8 @@ export default function HomePage() {
           </section>
         </FadeIn>
 
-        {/* 우측 부상 선수 섹션 (3열 중 1열) */}
-        <FadeIn className="lg:col-span-1" delayMs={120}>
+        {/* 우측 부상 선수 섹션 (3열 중 1열) — strip 자체가 h-full 로 늘어남 */}
+        <FadeIn className="lg:col-span-1 h-full" delayMs={120}>
           <InjuredPlayersStrip />
         </FadeIn>
       </div>
