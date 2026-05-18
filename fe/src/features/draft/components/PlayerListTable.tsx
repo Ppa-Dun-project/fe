@@ -39,7 +39,6 @@ type Props = {
   authed: boolean;
   hasDraftConfig: boolean;
   notes: Record<string, string>;
-  affectedPlayerIds: Set<string>;
   compareAId: string | null;
   compareBId: string | null;
   onAddPick: (player: DraftPlayerPublic) => void;
@@ -65,7 +64,6 @@ export default function PlayerListTable({
   authed,
   hasDraftConfig,
   notes,
-  affectedPlayerIds,
   compareAId,
   compareBId,
   onAddPick,
@@ -138,13 +136,6 @@ export default function PlayerListTable({
                   <div className="text-center text-white/45">{(page - 1) * pageSize + idx + 1}</div>
 
                   <div className="min-w-0 flex items-center gap-1">
-                    {affectedPlayerIds.has(player.id) && (
-                      <span
-                        className="inline-block h-2 w-2 shrink-0 rounded-full bg-rose-500 animate-pulse"
-                        title="Recent update"
-                        aria-label="Recent update"
-                      />
-                    )}
                     <button
                       type="button"
                       onClick={() => onOpenPlayerInfo(player.id, player.playerType)}

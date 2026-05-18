@@ -23,7 +23,7 @@ const VARIANT_CLASS: Record<ToastVariant, string> = {
   depth: "border-amber-400/60 bg-amber-500/25 text-amber-50",
 };
 
-const DEFAULT_DISMISS_MS = 3500;
+const DEFAULT_DISMISS_MS = 5000;
 
 export default function Toast({ toasts, onDismiss }: Props) {
   // 각 toast 가 마운트되면 (개별 durationMs 또는 기본 시간 후) 자동 dismiss.
@@ -48,11 +48,29 @@ export default function Toast({ toasts, onDismiss }: Props) {
         <div
           key={t.id}
           className={[
-            "pointer-events-auto max-w-sm rounded-2xl border px-4 py-3 text-sm font-semibold shadow-lg backdrop-blur",
+            "pointer-events-auto flex max-w-sm items-start gap-3 rounded-2xl border px-4 py-3 text-sm font-semibold shadow-lg backdrop-blur",
             VARIANT_CLASS[t.variant],
           ].join(" ")}
         >
-          {t.text}
+          <span className="flex-1">{t.text}</span>
+          <button
+            type="button"
+            onClick={() => onDismiss(t.id)}
+            aria-label="Dismiss notification"
+            className="-mr-1 -mt-1 shrink-0 rounded-md p-1 text-current opacity-60 transition hover:bg-white/10 hover:opacity-100"
+          >
+            <svg
+              viewBox="0 0 20 20"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth={2}
+              strokeLinecap="round"
+              className="h-3.5 w-3.5"
+              aria-hidden="true"
+            >
+              <path d="M5 5l10 10M15 5L5 15" />
+            </svg>
+          </button>
         </div>
       ))}
     </div>

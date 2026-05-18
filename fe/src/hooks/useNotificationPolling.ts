@@ -3,7 +3,9 @@
 // 동작:
 // 1. 마운트 시 첫 호출 응답의 latest_id 로 lastSeen을 맞춤 → 그 시점 이전의 모든
 //    알림은 무시 (토스트 안 띄움).
-// 2. 그 이후 polling은 since=lastSeen 으로 새로 들어온 알림만 받아 onEvent 호출.
+// 2. 그 이후 polling은 since=lastSeen 으로 새로 들어온 알림만 받아 onEvents 호출.
+//    한 cycle 의 새 events 를 통째로 배열로 전달 → 호출 측이 batch (e.g. 한 개로
+//    합쳐서 toast) 처리 가능. 매 이벤트마다 콜백 호출하면 toast 폭격이 됨.
 //
 // localStorage catch-up은 의도적으로 안 함 — 사용자가 자는 동안 쌓인 알림을
 // 깨어나서 한꺼번에 토스트로 받는 게 오히려 불편하다는 피드백 반영.
@@ -21,15 +23,15 @@ type Response = {
 };
 
 export function useNotificationPolling(
-  onEvent: (ev: NotificationEvent) => void,
+  onEvents: (evs: NotificationEvent[]) => void,
   enabled: boolean
 ) {
   // 콜백을 ref에 넣어둠 — 매 polling 호출이 최신 콜백을 보게 하면서도
-  // effect deps에 onEvent를 안 넣어 매 렌더마다 polling 재시작되는 일 방지.
-  const onEventRef = useRef(onEvent);
+  // effect deps에 onEvents를 안 넣어 매 렌더마다 polling 재시작되는 일 방지.
+  const onEventsRef = useRef(onEvents);
   useEffect(() => {
-    onEventRef.current = onEvent;
-  }, [onEvent]);
+    onEventsRef.current = onEvents;
+  }, [onEvents]);
 
   useEffect(() => {
     if (!enabled) return;
@@ -54,10 +56,12 @@ export function useNotificationPolling(
         const items = data.items ?? [];
         if (items.length === 0) return;
 
+        // lastSeenId 는 콜백 호출 전에 갱신해두면 콜백이 던지더라도 같은 이벤트가
+        // 다음 tick 에 다시 안 들어옴.
         for (const ev of items) {
-          onEventRef.current(ev);
           if (ev.id > lastSeenId) lastSeenId = ev.id;
         }
+        onEventsRef.current(items);
       } catch (err) {
         // 401, 5xx, 네트워크 끊김 등 — 다음 tick에 재시도하므로 조용히 처리.
         if (!cancelled) console.warn("notification polling failed:", err);
