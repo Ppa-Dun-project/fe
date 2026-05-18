@@ -57,10 +57,10 @@ export function useDraftSessionLoader({
 }: Params) {
   const navigate = useNavigate();
 
-  // 마운트 분기:
-  //  - sessionId 있음(로드 모드): GET /api/draft/sessions/{id}. 404 → 홈.
-  //  - 그 외(미저장 모드): sessionStorage 에서 unsaved draft 를 복원하거나
-  //    DEFAULT_DRAFT_CONFIG 로 player browser 시작.
+  // Mount branching:
+  //  - sessionId present (loaded mode): GET /api/draft/sessions/{id}. 404 → home.
+  //  - Otherwise (unsaved mode): restore the unsaved draft from sessionStorage,
+  //    or start the player browser with DEFAULT_DRAFT_CONFIG.
   useEffect(() => {
     if (isLoadedMode) {
       const controller = new AbortController();
@@ -82,14 +82,14 @@ export function useDraftSessionLoader({
         .catch((err: unknown) => {
           if (err instanceof DOMException && err.name === "AbortError") return;
           console.error(err);
-          // 404 또는 기타 실패 → 홈으로
+          // 404 or other failure → redirect home
           navigate("/", { replace: true });
         });
 
       return () => controller.abort();
     }
 
-    // 미저장 모드 — sessionStorage 가 있으면 resume, 없으면 default config.
+    // Unsaved mode — resume from sessionStorage if present, otherwise use the default config.
     let parsed: UnsavedDraft | null = null;
     try {
       const raw = readUnsavedDraftStorage();
@@ -114,7 +114,7 @@ export function useDraftSessionLoader({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoadedMode, navigate, sessionId]);
 
-  // 로드 모드 전용 — 서버에서 메모 가져오기. 미저장 모드는 위 effect 가 sessionStorage 에서 채워줌.
+  // Loaded mode only — fetches notes from the server. In unsaved mode the effect above fills these in from sessionStorage.
   useEffect(() => {
     if (!isLoadedMode || sessionId === null) return;
     const controller = new AbortController();

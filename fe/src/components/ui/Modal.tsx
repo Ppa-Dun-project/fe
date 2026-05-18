@@ -7,7 +7,7 @@ type Props = PropsWithChildren<{
   title?: string;
   onClose: () => void;
   footer?: React.ReactNode;
-  // 기본 max-w-2xl. "large"는 max-w-4xl — 좌우 두 컬럼 레이아웃에 적합.
+  // Default is max-w-2xl. "large" is max-w-4xl — suitable for two-column layouts.
   size?: Size;
 }>;
 

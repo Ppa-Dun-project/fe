@@ -36,7 +36,7 @@ export default function Dropdown<T extends string>({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, []);
 
-  // ✅ 드롭다운이 열리면 현재 선택된 옵션이 보이도록 스크롤 맞추기(선택)
+  // When the dropdown opens, scroll the currently selected option into view (optional UX nicety)
   useEffect(() => {
     if (!open) return;
     const list = listRef.current;
@@ -75,7 +75,7 @@ export default function Dropdown<T extends string>({
           ${open ? "max-h-80 opacity-100 translate-y-0" : "max-h-0 opacity-0 -translate-y-1"}
         `}
       >
-        {/* ✅ 이 영역이 실제 스크롤 컨테이너 */}
+        {/* This area is the actual scroll container */}
         <div
           ref={listRef}
           className="
@@ -83,7 +83,7 @@ export default function Dropdown<T extends string>({
             py-1
           "
           onWheel={(e) => {
-            // ✅ 옵션 스크롤이 페이지 스크롤로 튀지 않게 막기
+            // Prevent option-list scrolling from leaking into page scroll
             e.stopPropagation();
           }}
         >

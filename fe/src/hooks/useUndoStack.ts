@@ -11,15 +11,17 @@ type Updater<T> = T | ((prev: T) => T);
 const HISTORY_LIMIT = 50;
 
 /**
- * useUndoStack: present 값을 관리하면서 변경 이력을 past/future 스택에 쌓는 hook.
+ * useUndoStack: hook that manages a present value while pushing change
+ * history onto past/future stacks.
  *
- *   commit(next)   — present 를 next 로 바꾸고 이전 값을 past 에 push (future 는 비움)
- *   undo()         — past 의 가장 최근 항목으로 되돌리고 현재 값을 future 로 보냄
- *   redo()         — future 의 가장 앞 항목으로 전진하고 현재 값을 past 로 보냄
- *   reset(next)    — past/future 를 모두 비우고 present 를 next 로 설정 (예: 새 세션 로드)
+ *   commit(next)   — replace present with next and push the previous value to past (clears future)
+ *   undo()         — roll back to the most recent past entry and move the current value to future
+ *   redo()         — step forward to the first future entry and move the current value to past
+ *   reset(next)    — clear both past and future and set present to next (e.g. loading a new session)
  *
- * commit/undo/redo 는 안정된 함수 참조라 deps 에 안전하게 넣을 수 있다.
- * past 길이는 HISTORY_LIMIT 으로 제한해 메모리 폭주 방지.
+ * commit/undo/redo have stable function identities, so they can be safely
+ * placed in dependency arrays. The past length is capped by HISTORY_LIMIT
+ * to prevent unbounded memory growth.
  */
 export function useUndoStack<T>(initial: T) {
   const [stack, setStack] = useState<Stack<T>>({

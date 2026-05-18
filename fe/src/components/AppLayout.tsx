@@ -1,26 +1,26 @@
-// Outlet: 자식 라우트가 렌더링되는 자리 (React Router의 핵심 컴포넌트)
-// - router.tsx의 children 라우트가 이 자리에 들어감
+// Outlet: the slot where child routes get rendered (a core React Router component)
+// - The children routes from router.tsx are mounted here
 import { Outlet } from "react-router-dom";
 import Navbar from "./Navbar";
 
 /**
- * AppLayout: 모든 페이지의 공통 레이아웃
- * - 상단에 Navbar, 그 아래에 페이지 내용이 렌더링됨
- * - 최대 너비 1400px로 제한해서 큰 모니터에서도 가독성 유지
+ * AppLayout: shared layout for every page
+ * - Navbar on top, page content rendered below it
+ * - Caps the width at 1400px to keep readability on large monitors
  */
 export default function AppLayout() {
   return (
-    // min-h-screen: 최소 높이를 화면 전체로 (짧은 페이지도 배경이 꽉 참)
-    // bg-black text-white: 검정 배경 + 흰 글자 (다크 테마)
+    // min-h-screen: minimum height set to the full viewport (short pages still fill the background)
+    // bg-black text-white: black background + white text (dark theme)
     <div className="min-h-screen bg-black text-white">
       <Navbar />
 
-      {/* w-full: 전체 너비 / px-8: 좌우 패딩 / py-6: 상하 패딩 */}
+      {/* w-full: full width / px-8: horizontal padding / py-6: vertical padding */}
       <main className="w-full px-8 py-6">
-        {/* mx-auto: 좌우 마진 auto (가운데 정렬) */}
-        {/* max-w-[1400px]: 최대 너비 1400px로 제한 */}
+        {/* mx-auto: auto left/right margins (centers the content) */}
+        {/* max-w-[1400px]: caps the width at 1400px */}
         <div className="mx-auto w-full max-w-[1400px]">
-          {/* Outlet: 현재 URL에 맞는 페이지 컴포넌트가 여기에 들어감 */}
+          {/* Outlet: the page component matching the current URL gets injected here */}
           <Outlet />
         </div>
       </main>

@@ -1,6 +1,7 @@
 // Hook backing the user's per-group stat-column selection (exactly 5 slots each).
-// 슬롯은 항상 5개로 고정 — 비어 있는 자리는 null. 한 자리를 빼도 다른 컬럼이
-// 좌측으로 밀려나지 않도록, X 는 자리를 null 로 만들고 + 는 첫 빈 자리를 채운다.
+// Slots are always fixed at 5 — empty positions are null. To keep other columns
+// from shifting left when one is removed, X sets the slot to null and + fills
+// the first empty slot.
 // Values live in localStorage so the choice persists across reloads on this
 // device only — same scope as ppadun_unsaved_draft.
 
@@ -23,7 +24,7 @@ function storageKey(group: StatGroup): string {
   return group === "batter" ? BATTER_KEY : PITCHER_KEY;
 }
 
-// 항상 길이 5. 짧으면 null 로 패딩, 길면 앞 5개만 취한다.
+// Always length 5. Pads with null if shorter; truncates to the first 5 if longer.
 function normalizeLength(cols: StatSlot[]): StatSlot[] {
   if (cols.length === STAT_COLUMN_COUNT) return cols;
   if (cols.length > STAT_COLUMN_COUNT) return cols.slice(0, STAT_COLUMN_COUNT);
@@ -37,7 +38,7 @@ function readCols(group: StatGroup): StatSlot[] {
     if (!raw) return normalizeLength(defaults);
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return normalizeLength(defaults);
-    // 옛 저장본 호환: 5보다 길면 reset, 짧으면 null 패딩.
+    // Legacy compatibility: reset if longer than 5, pad with null if shorter.
     const slots: StatSlot[] = [];
     for (const k of parsed) {
       if (k === null) {
@@ -46,7 +47,7 @@ function readCols(group: StatGroup): StatSlot[] {
       }
       if (typeof k !== "string") return normalizeLength(defaults);
       const def = getStatDef(k);
-      // 그룹이 안 맞으면 손상된 데이터로 보고 기본값으로 복귀.
+      // If the group doesn't match, treat the data as corrupted and fall back to defaults.
       if (!def || def.group !== group) return normalizeLength(defaults);
       slots.push(k);
     }
@@ -77,7 +78,7 @@ export function useStatColumns(): UseStatColumns {
   const [batterCols, setBatterColsState] = useState<StatSlot[]>(() => readCols("batter"));
   const [pitcherCols, setPitcherColsState] = useState<StatSlot[]>(() => readCols("pitcher"));
 
-  // 항상 길이 5 유지. 다른 길이가 들어와도 normalize 해서 일관성 보장.
+  // Always maintain a length of 5. Normalize any other length to guarantee consistency.
   const setBatterCols = useCallback((cols: StatSlot[]) => {
     const next = normalizeLength(cols);
     writeCols("batter", next);

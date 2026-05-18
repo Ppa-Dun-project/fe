@@ -6,7 +6,7 @@ import type {
 } from "../../types/draft";
 import type { UnsavedDraft } from "../draft/draftHelpers";
 
-// 백엔드 MyTeamPlayersResponse 와 동일한 shape (myteam.py)
+// Same shape as the backend MyTeamPlayersResponse (myteam.py).
 export type MyTeamSynthesized = {
   items: MyTeamPlayer[];
   totalBudget: number;
@@ -14,16 +14,16 @@ export type MyTeamSynthesized = {
   remainingBudget: number;
 };
 
-// 미저장 드래프트 (sessionStorage) 를 백엔드 my-team 응답과 동일한 shape 로 합성.
-// 백엔드 pick_my_players + get_budget_summary 의 클라이언트 미러 — 저장 전이라도
-// My Team 페이지가 실시간 픽을 반영하도록.
+// Synthesizes an unsaved draft (sessionStorage) into the same shape as the backend my-team response.
+// A client-side mirror of the backend's pick_my_players + get_budget_summary — so that the
+// My Team page reflects picks in real time even before saving.
 export function synthesizeUnsavedMyTeam(
   unsaved: UnsavedDraft,
   publicPlayers: DraftPlayerPublic[],
   values: DraftPlayerValue[] | null,
 ): MyTeamSynthesized {
-  // main 픽만 — 백엔드는 모든 kind 를 가져오지만 minor/taxi 는 slotPos === null
-  // 이라 pos: string 매핑이 불가능. 메인 로스터만 표시하는 게 의미적으로도 일치.
+  // Main picks only — the backend returns every kind, but minor/taxi picks have slotPos === null
+  // so they can't be mapped to a pos: string. Showing only the main roster is also semantically aligned.
   const mine = unsaved.picks
     .filter((p) => p.draftedByTeamId === "team-0" && (p.kind ?? "main") === "main")
     .sort((a, b) => a.slotIndex - b.slotIndex);
@@ -52,14 +52,14 @@ function buildMyTeamItemFromPick(
   player: DraftPlayerPublic,
   ppaValue: number | null,
 ): MyTeamPlayer {
-  // SP/RP 슬롯이면 투수로 취급 (two_way 포함). 그 외엔 player.playerType 그대로.
+  // SP/RP slots are treated as pitchers (including two_way players). Otherwise use player.playerType as-is.
   const isPitcherSlot = pick.slotPos === "SP" || pick.slotPos === "RP";
   const playerType: "batter" | "pitcher" =
     player.playerType === "pitcher" || (player.playerType === "two_way" && isPitcherSlot)
       ? "pitcher"
       : "batter";
 
-  // 백엔드 mirror: BENCH 면 원본 포지션을 괄호 안에, DH/TWP 는 UTIL 로 흡수.
+  // Mirrors the backend: for BENCH, wrap the original position in parentheses; absorb DH/TWP into UTIL.
   let displayPos: string;
   if (pick.slotPos === "BENCH") {
     const raw = player.positions[0] ?? "UTIL";
@@ -111,10 +111,10 @@ function speedSortValue(player: MyTeamPlayer) {
 }
 
 /**
- * 선수 목록 필터링
- * - 이름/팀명 검색 (대소문자 무시)
- * - 포지션 필터 (ALL이면 전체)
- * - BENCH(1B) 같은 포맷도 포지션 문자열에 포함되면 매칭
+ * Filters the player list
+ * - Search by name/team (case-insensitive)
+ * - Position filter (ALL matches everything)
+ * - Formats like BENCH(1B) also match if the position substring is contained in the player's pos string
  */
 export function filterMyTeam(
   players: MyTeamPlayer[],
@@ -131,9 +131,9 @@ export function filterMyTeam(
   });
 }
 
-/** 선수 목록 정렬 (정렬 옵션별 비교 함수 적용) */
+/** Sorts the player list (applying the comparison function for each sort option). */
 export function sortMyTeam(players: MyTeamPlayer[], sort: MyTeamSort): MyTeamPlayer[] {
-  // 원본 배열을 변경하지 않도록 복사본 사용
+  // Use a copy to avoid mutating the source array.
   const copy = [...players];
 
   switch (sort) {
@@ -158,7 +158,7 @@ export function sortMyTeam(players: MyTeamPlayer[], sort: MyTeamSort): MyTeamPla
   }
 }
 
-/** 타율을 .300 같은 야구식 표기로 포맷 (0이면 "-") */
+/** Formats a batting average in baseball notation like ".300" (returns "-" if 0). */
 export function formatAvg(avg: number) {
   if (!avg) return "-";
   return avg.toFixed(3).replace("0.", ".");
