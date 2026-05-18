@@ -101,6 +101,24 @@ import LoginPromptModal from "../features/auth/LoginPromptModal";
 
 const PAGE_SIZE = 30;
 
+// Notification event_type → toast prefix + variant 매핑.
+// 알 수 없는 type 은 일반 알림 fallback.
+function notificationDisplay(eventType: string): {
+  prefix: string;
+  variant: ToastVariant;
+} {
+  switch (eventType) {
+    case "INJURY":
+      return { prefix: "🏥 INJURY UPDATE", variant: "injury" };
+    case "DEPTH":
+      return { prefix: "📊 DEPTH CHART UPDATE", variant: "depth" };
+    case "NEWS":
+      return { prefix: "📰 MLB NEWS", variant: "info" };
+    default:
+      return { prefix: "🔔 NOTIFICATION", variant: "info" };
+  }
+}
+
 // Pure helpers, constants, and inline response/payload types live in
 // `draftHelpers.ts` so this file stays focused on orchestration. See that
 // module for: matchesPositionFilter, isPitcherOnly, isPitcherPositionFilter,
@@ -222,35 +240,26 @@ export default function DraftPage() {
   // 메모 — playerId → note. 로드 모드에서만 fetch/저장 동작 (세션 ID 필요).
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [noteTarget, setNoteTarget] = useState<DraftPlayer | null>(null);
-  const [noteSaving, setNoteSaving] = useState(false);
+  // 15초마다 백엔드 알림 폴링. 한 cycle에서 새 이벤트가 여러 개 들어오면
+  // toast 폭격을 피하려고 한 개로 합쳐서 보여준다 (가장 최근 이벤트 메시지 + 카운트).
+  useNotificationPolling((evs: NotificationEvent[]) => {
+    if (evs.length === 0) return;
 
-  // 부상/뎁스 변경 알림 받은 선수 id 집합 — 페이지 떠나기 전까지 row에 빨간 점 표시.
-  const [affectedPlayerIds, setAffectedPlayerIds] = useState<Set<string>>(new Set());
+    if (evs.length === 1) {
+      const ev = evs[0];
+      const { prefix, variant } = notificationDisplay(ev.event_type);
+      pushToast(`${prefix} — ${ev.message}`, variant);
+      return;
+    }
 
-  // 15초마다 백엔드 알림 폴링. 새 이벤트마다 toast + affectedPlayerIds 업데이트.
-  // event_type 별로 prefix와 색을 다르게 → 사용자가 한눈에 종류 파악 가능.
-  // 토스트는 8초간 유지 (기본 3.5초보다 길게) 해서 메시지 읽을 시간 확보.
-  useNotificationPolling((ev: NotificationEvent) => {
-    const isInjury = ev.event_type === "INJURY";
-    const isDepth = ev.event_type === "DEPTH";
-    const prefix = isInjury
-      ? "🏥 INJURY UPDATE"
-      : isDepth
-        ? "📊 DEPTH CHART UPDATE"
-        : "🔔 NOTIFICATION";
-    const variant: ToastVariant = isInjury
-      ? "injury"
-      : isDepth
-        ? "depth"
-        : "info";
-
-    pushToast(`${prefix} — ${ev.message}`, variant, 8000);
-
-    setAffectedPlayerIds((prev) => {
-      const next = new Set(prev);
-      next.add(ev.player_id);
-      return next;
-    });
+    // 여러 개 — 가장 최근 (id가 가장 큰) 이벤트를 대표로 표시하고 나머지는 카운트로.
+    const sorted = [...evs].sort((a, b) => b.id - a.id);
+    const latest = sorted[0];
+    const { prefix, variant } = notificationDisplay(latest.event_type);
+    pushToast(
+      `${prefix} — ${latest.message} (+${evs.length - 1} more)`,
+      variant
+    );
   }, authed);
 
   // Save / Import 모달
@@ -1377,7 +1386,6 @@ export default function DraftPage() {
         authed={authed}
         hasDraftConfig={hasDraftConfig}
         notes={notes}
-        affectedPlayerIds={affectedPlayerIds}
         compareAId={compareAId}
         compareBId={compareBId}
         onAddPick={handleAddClick}
