@@ -26,6 +26,7 @@ export default function TakenBidModal({
 
   const initialTeamId = useMemo(() => otherTeams[0]?.id ?? "", [otherTeams]);
 
+  // 부모가 player.id 로 `key` 를 지정해 모달을 remount → useState 초기값이 매번 새로 평가됨.
   const [draftedByTeamId, setDraftedByTeamId] = useState(initialTeamId);
   const [bid, setBid] = useState("");
   const [minBidErrorOpen, setMinBidErrorOpen] = useState(false);
@@ -79,7 +80,6 @@ export default function TakenBidModal({
 
   const handleConfirm = () => {
     if (!validTeam) return;
-    // 마이너/택시는 bid 가 없으니 그대로 confirm.
     if (!isMainKind) {
       onConfirm(draftedByTeamId, null);
       return;

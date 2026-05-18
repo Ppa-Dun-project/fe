@@ -118,11 +118,6 @@ export function formatAvg(avg: number | null) {
   return avg.toFixed(3).replace("0.", ".");
 }
 
-/** Draft cost style — blurred for unauthenticated users. */
-export function draftCostClass(authed: boolean) {
-  return authed ? "text-white/80" : "blur-sm select-none text-white/50";
-}
-
 /**
  * 선수의 positions 가 해당 슬롯의 position 에 대해 자격을 가지는지 확인.
  *   BENCH: 누구든 OK

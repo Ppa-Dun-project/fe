@@ -56,10 +56,13 @@ export default function Modal({
             {title && <h3 className="text-lg font-semibold text-white">{title}</h3>}
           </div>
           <button
+            type="button"
             onClick={onClose}
-            className="rounded-lg border border-white/10 px-2 py-1 text-xs text-white/80 hover:bg-white/5 transition"
+            aria-label="Close"
+            title="Close (Esc)"
+            className="grid h-7 w-7 place-items-center rounded-lg border border-white/10 text-sm text-white/80 hover:bg-white/5 transition"
           >
-            ESC
+            ✕
           </button>
         </div>
 

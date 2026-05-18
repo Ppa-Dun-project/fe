@@ -152,7 +152,7 @@ export default function HomePage() {
               <div>
                 <h2 className="text-lg font-bold text-white">Latest News</h2>
                 <p className="mt-1 text-xs text-white/50">
-                  Fetched from Yahoo Sports · refreshes every hour
+                  Fetched from Yahoo Sports · refreshes every 10 minutes
                 </p>
               </div>
               {/* "모두 보기" 버튼 → Yahoo Sports MLB 뉴스 페이지로 외부 이동 */}
@@ -167,7 +167,7 @@ export default function HomePage() {
             </div>
 
             {/* 뉴스 카드 3개 렌더링 (배열.map으로 반복) */}
-            <div className="mt-5 grid grid-cols-1 gap-4">
+            <div className="mt-5 space-y-4">
               {news.map((item) => (
                 // key: React가 리스트 항목을 식별하기 위한 고유값 (필수)
                 <NewsCard key={item.id} item={item} />
@@ -176,7 +176,7 @@ export default function HomePage() {
           </section>
         </FadeIn>
 
-        {/* 우측 부상 선수 섹션 (3열 중 1열) */}
+        {/* 우측 부상 선수 섹션 (3열 중 1열) — 자기 자연 높이 + 내부 스크롤 */}
         <FadeIn className="lg:col-span-1" delayMs={120}>
           <InjuredPlayersStrip />
         </FadeIn>
