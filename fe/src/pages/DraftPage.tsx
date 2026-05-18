@@ -72,6 +72,7 @@ import {
 } from "../features/draft/draftHelpers";
 
 import DraftRoomBoard from "../features/draft/components/DraftRoomBoard";
+import TeamStandings from "../features/draft/components/TeamStandings";
 import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
 import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
@@ -1418,6 +1419,18 @@ export default function DraftPage() {
         onStartDraft={openStartDraft}
         onRename={openRenameModal}
       />
+
+      {authed && hasDraftConfig && config && (
+        <FadeIn delayMs={45}>
+          <TeamStandings
+            teams={teams}
+            picks={picks}
+            playerValues={playerValues}
+            budget={config.budget}
+            rosterPlayers={config.rosterPlayers}
+          />
+        </FadeIn>
+      )}
 
       <FadeIn delayMs={60}>
         <div ref={draftRoomTopRef}>
