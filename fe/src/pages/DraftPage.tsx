@@ -78,6 +78,7 @@ import CustomizeStatsModal from "../features/draft/components/CustomizeStatsModa
 import SaveSessionModal from "../features/draft/components/SaveSessionModal";
 import NewDraftConfirmModal from "../features/draft/components/NewDraftConfirmModal";
 import ImportSessionsModal from "../features/draft/components/ImportSessionsModal";
+import CopySessionModal from "../features/draft/components/CopySessionModal";
 import PlayerListTable from "../features/draft/components/PlayerListTable";
 import DraftHeaderBar from "../features/draft/components/DraftHeaderBar";
 import PlayerSearchToolbar from "../features/draft/components/PlayerSearchToolbar";
@@ -723,33 +724,51 @@ export default function DraftPage() {
     commitPicks((prev) => prev.filter((p) => p.playerId !== pick.playerId));
   };
 
-  // 내 팀 보드 안에서 드래그로 슬롯을 옮길 때:
-  //   - 메인: 자격(isEligibleForSlot) 검사 후 이동/스왑.
-  //   - 마이너/택시: 포지션 자격이 없으니 순수 재정렬(스왑/빈자리 이동).
-  // kind 는 어느 보드의 슬롯을 만지는지 — 같은 kind 내에서만 인덱스 충돌이 발생.
-  // teamId 는 재배치가 일어난 팀 — 내 팀뿐 아니라 opponent 팀의 픽도 사용자가 직접 정리 가능.
+  // 드래그-드롭으로 슬롯/팀을 옮길 때:
+  //  - 같은 팀: 메인은 자격 검사 후 이동/스왑, 마이너·택시는 순수 재정렬.
+  //  - 다른 팀: 빈 슬롯 + 자격(메인) 일 때만 이동. occupied 면 스왑 대신 토스트로 안내.
   const handleSlotReassign = (
+    fromTeamId: string,
     fromIndex: number,
+    toTeamId: string,
     toIndex: number,
     kind: DraftPickKind,
-    teamId: string,
   ) => {
-    if (fromIndex === toIndex) return;
+    if (fromTeamId === toTeamId && fromIndex === toIndex) return;
 
-    const teamPicks = picks.filter(
-      (p) => p.draftedByTeamId === teamId && p.kind === kind
+    const fromTeamPicks = picks.filter(
+      (p) => p.draftedByTeamId === fromTeamId && p.kind === kind
     );
-    const fromPick = teamPicks.find((p) => p.slotIndex === fromIndex);
+    const fromPick = fromTeamPicks.find((p) => p.slotIndex === fromIndex);
     if (!fromPick) return;
-    const toPick = teamPicks.find((p) => p.slotIndex === toIndex);
 
-    // 마이너/택시: 자격 검사 없이 그냥 스왑/이동.
+    const toTeamPicks = picks.filter(
+      (p) => p.draftedByTeamId === toTeamId && p.kind === kind
+    );
+    const toPick = toTeamPicks.find((p) => p.slotIndex === toIndex);
+    const isCrossTeam = fromTeamId !== toTeamId;
+
+    // 팀 간 이동: occupied 면 스왑 안 함, 토스트로 안내.
+    if (isCrossTeam && toPick) {
+      const targetTeam = teams.find((t) => t.id === toTeamId);
+      pushToast(
+        `${targetTeam?.name ?? "Target team"} already has a player in that slot.`,
+        "error",
+      );
+      return;
+    }
+
+    // 마이너/택시: 자격 검사 없이 처리.
     if (kind !== "main") {
       commitPicks((prev) =>
         prev.map((p) => {
           if (p.kind !== kind) return p;
-          if (p.playerId === fromPick.playerId) return { ...p, slotIndex: toIndex };
-          if (toPick && p.playerId === toPick.playerId) return { ...p, slotIndex: fromIndex };
+          if (p.playerId === fromPick.playerId) {
+            return { ...p, slotIndex: toIndex, draftedByTeamId: toTeamId };
+          }
+          if (toPick && p.playerId === toPick.playerId) {
+            return { ...p, slotIndex: fromIndex };
+          }
           return p;
         })
       );
@@ -768,7 +787,24 @@ export default function DraftPage() {
       return;
     }
 
-    // Empty target → simple move.
+    // 팀 간 이동 (빈 슬롯 확인은 위에서 끝남): teamId + slotIndex + slotPos 교체.
+    if (isCrossTeam) {
+      commitPicks((prev) =>
+        prev.map((p) =>
+          p.playerId === fromPick.playerId
+            ? {
+                ...p,
+                slotIndex: toIndex,
+                slotPos: toSlotPos as DraftPosition,
+                draftedByTeamId: toTeamId,
+              }
+            : p
+        )
+      );
+      return;
+    }
+
+    // 같은 팀 — 빈 target → 단순 이동.
     if (!toPick) {
       commitPicks((prev) =>
         prev.map((p) =>
@@ -780,7 +816,7 @@ export default function DraftPage() {
       return;
     }
 
-    // Occupied target → swap only when both directions are eligible.
+    // 같은 팀 — occupied target → 양방향 자격 모두 OK 일 때만 스왑.
     const toPlayer = playersById[toPick.playerId];
     if (!toPlayer) return;
     if (!isEligibleForSlot(toPlayer.positions, fromSlotPos)) {
@@ -999,6 +1035,11 @@ export default function DraftPage() {
   // ── Import 모달 핸들러 ──
   const [sessionList, setSessionList] = useState<SessionSummary[]>([]);
   const [sessionListLoading, setSessionListLoading] = useState(false);
+  // Copy 흐름: Copy 버튼 클릭 시 rename 모달을 띄우고, Confirm 시 실제 POST.
+  const [copyTarget, setCopyTarget] = useState<{ id: number } | null>(null);
+  const [copyNameInput, setCopyNameInput] = useState("");
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [copySaving, setCopySaving] = useState(false);
 
   const refreshSessionList = () => {
     setSessionListLoading(true);
@@ -1023,6 +1064,79 @@ export default function DraftPage() {
   const handleSessionPick = (id: number) => {
     closeImportModal();
     navigate(`/draft/${id}`);
+  };
+
+  // Copy 버튼 클릭: rename 모달을 띄운다. 실제 POST 는 handleCopyConfirm.
+  const handleSessionCopy = (id: number) => {
+    const source = sessionList.find((s) => s.id === id);
+    setCopyTarget({ id });
+    setCopyNameInput(source ? `${source.name} (Copy)` : "Copied Draft");
+    setCopyError(null);
+  };
+
+  const closeCopyModal = () => {
+    if (copySaving) return;
+    setCopyTarget(null);
+    setCopyNameInput("");
+    setCopyError(null);
+  };
+
+  // Confirm: 원본 세션 + 메모 로드 → 사용자가 입력한 이름으로 새 세션 POST.
+  const handleCopyConfirm = () => {
+    if (copyTarget === null) return;
+    const name = copyNameInput.trim();
+    if (!name) {
+      setCopyError("Name is required");
+      return;
+    }
+    const sourceId = copyTarget.id;
+    setCopySaving(true);
+    setCopyError(null);
+
+    apiGetAuth<SessionDetail>(`/api/draft/sessions/${sourceId}`)
+      .then(async (original) => {
+        const notesResp = await apiGetAuth<{ items: { playerId: string; note: string }[] }>(
+          `/api/draft/sessions/${sourceId}/notes`,
+        ).catch(() => ({ items: [] }));
+
+        const created = await apiPostAuth<
+          SessionDetail,
+          { name: string; config: DraftConfigServer; picks: DraftPick[] }
+        >("/api/draft/sessions", {
+          name,
+          config: original.config,
+          picks: original.picks,
+        });
+
+        if (notesResp.items.length > 0) {
+          await Promise.all(
+            notesResp.items.map((n) =>
+              apiPutAuth<{ status: string }, { note: string }>(
+                `/api/draft/sessions/${created.id}/notes/${encodeURIComponent(n.playerId)}`,
+                { note: n.note },
+              ).catch((err: unknown) => {
+                console.error(`Failed to copy note for ${n.playerId}:`, err);
+              }),
+            ),
+          );
+        }
+
+        setCopySaving(false);
+        setCopyTarget(null);
+        setCopyNameInput("");
+        pushToast(`Copied as "${created.name}".`, "success");
+        refreshSessionList();
+      })
+      .catch((err: unknown) => {
+        console.error(err);
+        setCopySaving(false);
+        const msg = err instanceof Error ? err.message : "";
+        if (msg.includes("Maximum")) {
+          setCopyError("Reached max session count. Delete one and try again.");
+        } else {
+          setCopyError(msg || "Copy failed");
+        }
+      });
   };
 
   const handleSessionDelete = (id: number) => {
@@ -1245,6 +1359,18 @@ export default function DraftPage() {
           onClose={closeImportModal}
           onPick={handleSessionPick}
           onDelete={handleSessionDelete}
+          onCopy={handleSessionCopy}
+        />
+      )}
+
+      {copyTarget !== null && (
+        <CopySessionModal
+          nameInput={copyNameInput}
+          onChangeName={setCopyNameInput}
+          error={copyError}
+          copying={copySaving}
+          onCancel={closeCopyModal}
+          onConfirm={handleCopyConfirm}
         />
       )}
 
