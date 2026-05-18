@@ -13,14 +13,13 @@ type Props = {
 };
 
 // 이미지의 "구현 관점" 컬럼을 그대로. hover tooltip(title attr) 으로 노출.
+// LX/X 는 영입 시점 코드로는 의미가 없어 (자연 만료/비보호 상태) picker 에서 제외 — rollover 결과로만 등장.
 const CONTRACT_OPTIONS: { code: ContractCode; label: string; tooltip: string }[] = [
   { code: "F3", label: "F3", tooltip: "Free Agent 계약 3년차 시작 / 3년 남음. 새로 영입한 FA 선수의 기본 장기 계약 시작값." },
   { code: "F2", label: "F2", tooltip: "Free Agent 계약 2년 남음. 시즌이 지나면 F3 → F2." },
   { code: "F1", label: "F1", tooltip: "Free Agent 계약 마지막 1년. 다음 오프시즌에 재계약/연장/방출 판단 필요." },
   { code: "S1", label: "S1", tooltip: "Short / Single-year 계약. 임시 영입, 단기 계약, 드래프트 보충 선수에 사용." },
   { code: "L2", label: "L2", tooltip: "Long-term 계약 2년 남음. 기존 선수를 연장계약한 상태." },
-  { code: "LX", label: "LX", tooltip: "Long-term 계약 만료 / 최종 상태. 더 이상 일반 연장이 안 되는 단계." },
-  { code: "X",  label: "X",  tooltip: "계약 없음 / 만료 / 방출 가능 / 비보호 상태. 다음 시즌 보유 불가." },
 ];
 
 export default function AddBidModal({
@@ -169,7 +168,7 @@ export default function AddBidModal({
 
             <div>
               <div className="text-xs font-extrabold text-white/70">Contract</div>
-              <div className="mt-2 grid grid-cols-7 gap-1.5">
+              <div className="mt-2 grid grid-cols-5 gap-1.5">
                 {CONTRACT_OPTIONS.map((opt) => {
                   const active = contractCode === opt.code;
                   return (
