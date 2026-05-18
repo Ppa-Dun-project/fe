@@ -17,6 +17,7 @@ import {
   sortMyTeam,
 } from "../features/myteam/utils";
 import { mlbTeamBadgeClass } from "../features/draft/utils";
+import { getActiveDraftSessionId } from "../features/draft/draftHelpers";
 import { formatPpa, ppaValueClass } from "../utils/playerValue";
 import { apiGetAuth } from "../lib/api";
 import PlayerInfoModal from "../features/players/components/PlayerInfoModal";
@@ -98,9 +99,11 @@ export default function MyTeamPage() {
   const [profilePlayerType, setProfilePlayerType] = useState<"batter" | "pitcher">("batter");
 
   // ── 1단계: 세션 목록 조회 + sessionId 결정 ──
-  // - URL ?sessionId 가 사용자 소유 세션 중 하나면 그 값을 사용 (새로고침/공유 케이스)
-  // - 아니면 last_opened_at DESC 기준 첫 번째 세션을 default 로 사용
-  // - 0개면 sessionId 는 null 로 두고 빈 상태 UI 표시
+  // 우선순위:
+  //   1) activeDraftSessionId (sessionStorage) — 사용자가 지금 Draft 페이지에서
+  //      보고 있는 세션. "My Team 은 현재 드래프트와 연동" 시맨틱.
+  //   2) URL ?sessionId — 직접 링크 / 북마크 케이스 (소유 세션일 때만).
+  //   3) 그 외 → "활성 드래프트 없음" 빈 상태 (자동으로 옛 세션 불러오지 않음).
   useEffect(() => {
     const controller = new AbortController();
 
@@ -119,17 +122,25 @@ export default function MyTeamPage() {
           return;
         }
 
+        // activeDraftSessionId 가 유효한 소유 세션이면 최우선.
+        const activeId = getActiveDraftSessionId();
+        if (activeId !== null && items.some((s) => s.id === activeId)) {
+          setSessionId(activeId);
+          const next = new URLSearchParams(searchParams);
+          next.set("sessionId", String(activeId));
+          setSearchParams(next, { replace: true });
+          return;
+        }
+
+        // 활성 드래프트가 없으면 URL 만 신뢰. 옛 stale URL 이라도 그 값이
+        // 소유 세션이면 그대로 두고 (북마크/공유 시나리오), 아니면 빈 상태.
         const urlIdNum = urlSessionIdRaw ? Number(urlSessionIdRaw) : NaN;
         const urlIsValid =
           Number.isFinite(urlIdNum) && items.some((s) => s.id === urlIdNum);
-        const resolvedId = urlIsValid ? urlIdNum : items[0].id;
-        setSessionId(resolvedId);
-
-        // URL 동기화 (잘못된/비어있는 sessionId → 가장 최근 세션으로 교체)
-        if (!urlIsValid || urlIdNum !== resolvedId) {
-          const next = new URLSearchParams(searchParams);
-          next.set("sessionId", String(resolvedId));
-          setSearchParams(next, { replace: true });
+        if (urlIsValid) {
+          setSessionId(urlIdNum);
+        } else {
+          setSessionId(null);
         }
       })
       .catch((err: unknown) => {
@@ -190,6 +201,11 @@ export default function MyTeamPage() {
 
   // 세션 0개 빈 상태 (sessions 로드 완료 + length === 0)
   const noSessions = sessions !== null && sessions.length === 0;
+  // 세션은 있지만 지금 보고 있을 활성 드래프트가 없음 (Draft 페이지에서 New/Discard
+  // 후, 또는 처음 들어왔는데 URL/active 세션 없음). 옛 세션을 자동으로
+  // 끌어오지 않고 명시적 안내 — "마이팀 = 현재 드래프트" 시맨틱 유지.
+  const noActiveDraft =
+    sessions !== null && sessions.length > 0 && sessionId === null;
   const sessionsLoading = sessions === null && sessionsError === null;
 
   // 클라이언트 측 필터링 + 정렬 (백엔드 재호출 없이 메모리에서 계산)
@@ -241,6 +257,24 @@ export default function MyTeamPage() {
         </FadeIn>
       )}
 
+      {/* 세션은 있지만 현재 활성 드래프트가 없음 (New/Discard 직후 등) */}
+      {noActiveDraft && (
+        <FadeIn delayMs={60}>
+          <section className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
+            <h2 className="text-lg font-black text-white">No active draft</h2>
+            <p className="mt-2 text-sm font-semibold text-white/70">
+              Start or load a draft session, and your team will appear here.
+            </p>
+            <Link
+              to="/draft"
+              className="mt-4 inline-block rounded-2xl bg-emerald-500 px-5 py-2 text-sm font-black text-black transition hover:bg-emerald-400"
+            >
+              Go to Draft
+            </Link>
+          </section>
+        </FadeIn>
+      )}
+
       {/* 세션 목록 조회 자체가 실패 */}
       {sessionsError && (
         <FadeIn delayMs={60}>
@@ -251,7 +285,7 @@ export default function MyTeamPage() {
       )}
 
       {/* 본문: 검색/정렬/포지션 필터 + 선수 목록 테이블 */}
-      {!noSessions && !sessionsError && (
+      {!noSessions && !noActiveDraft && !sessionsError && (
       <FadeIn delayMs={60} className="relative z-40">
         <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
           {/* 검색창 + 정렬 드롭다운 */}
