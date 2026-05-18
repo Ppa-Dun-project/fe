@@ -30,9 +30,10 @@ type Props = {
   pageSize: number;
   totalPages: number;
   onChangePage: (next: number) => void;
-  statColumnLabels: string[];
-  batterCols: string[];
-  pitcherCols: string[];
+  // 길이 5 고정. null 슬롯은 빈 셀 / 빈 헤더로 렌더해 좌우 밀림 방지.
+  statColumnLabels: (string | null)[];
+  batterCols: (string | null)[];
+  pitcherCols: (string | null)[];
   loading: boolean;
   error: string | null;
   authed: boolean;
@@ -81,11 +82,11 @@ export default function PlayerListTable({
           <div>Player</div>
           <div className="text-center">Pos</div>
           <div className="text-center">Team</div>
-          <div className="text-center">{statColumnLabels[0]}</div>
-          <div className="text-center">{statColumnLabels[1]}</div>
-          <div className="text-center">{statColumnLabels[2]}</div>
-          <div className="text-center">{statColumnLabels[3]}</div>
-          <div className="text-center">{statColumnLabels[4]}</div>
+          <div className="text-center">{statColumnLabels[0] ?? ""}</div>
+          <div className="text-center">{statColumnLabels[1] ?? ""}</div>
+          <div className="text-center">{statColumnLabels[2] ?? ""}</div>
+          <div className="text-center">{statColumnLabels[3] ?? ""}</div>
+          <div className="text-center">{statColumnLabels[4] ?? ""}</div>
           <div className="text-center">PPA-Value</div>
           <div className="text-center">Action</div>
           <div className="text-center">Compare</div>
@@ -202,16 +203,16 @@ export default function PlayerListTable({
                   </div>
 
                   {(isPitcherOnly(player) ? pitcherCols : batterCols).map((key, colIdx) => {
-                    const def = getStatDef(key);
+                    const def = key ? getStatDef(key) : null;
                     const value = def ? def.accessor(player) : null;
-                    const display = def ? def.format(value) : "—";
+                    const display = key === null ? "" : def ? def.format(value) : "—";
                     // 짝수 컬럼 옅은 화이트, 홀수 컬럼 앰버 강조 — 시선 흐름.
                     const cellClass =
                       colIdx % 2 === 0
                         ? "text-center text-white/70"
                         : "text-center font-semibold text-amber-300";
                     return (
-                      <div key={key} className={cellClass}>
+                      <div key={`stat-${colIdx}`} className={cellClass}>
                         {display}
                       </div>
                     );

@@ -196,7 +196,8 @@ export default function DraftPage() {
   // 사용자가 선택한 5개 스탯 (타자/투수 별도) — localStorage에 영구 저장.
   const { batterCols, pitcherCols, setBatterCols, setPitcherCols } = useStatColumns();
   const activeStatKeys = showingPitcherColumns ? pitcherCols : batterCols;
-  const statColumnLabels = activeStatKeys.map((k) => getStatDef(k)?.label ?? k);
+  // 슬롯이 null 이면 헤더 라벨도 빈 문자열 — 좌우 컬럼이 안 밀리도록.
+  const statColumnLabels = activeStatKeys.map((k) => (k ? getStatDef(k)?.label ?? k : ""));
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -361,6 +362,11 @@ export default function DraftPage() {
   // 포지션 필터를 바꾸면 paginated `players` 에서 사라질 수 있으므로 전체 lookup 사용.
   const selectedA = compareAId ? playersById[compareAId] ?? null : null;
   const selectedB = compareBId ? playersById[compareBId] ?? null : null;
+
+  // Compare 슬롯/모달/AI 모두 recommendedBid 를 필요로 함 — 선택되는 즉시 단건 호출로 미리 채움.
+  // 같은 선수가 재선택되면 다시 안 부르고, A/B 가 비면 즉시 null 로 reset.
+  const [compareBidA, setCompareBidA] = useState<number | null>(null);
+  const [compareBidB, setCompareBidB] = useState<number | null>(null);
 
   const openAddModal = (player: DraftPlayer) => {
     setAddTarget(player);
@@ -656,6 +662,71 @@ export default function DraftPage() {
 
     return () => controller.abort();
   }, [authed, config]);
+
+  // Compare A 가 바뀔 때마다 단건 bid 호출 — Compare 슬롯/모달/AI 가 같이 사용한다.
+  // 선택이 바뀌는 순간 옛 bid 가 새 선수에게 잘못 적용되지 않도록 microtask 로 reset.
+  // picks 는 fetch payload 에만 들어가고 deps 에는 빠짐 — 픽 마다 재호출하면 비싸기 때문.
+  useEffect(() => {
+    if (!authed || !config || !compareAId) {
+      queueMicrotask(() => setCompareBidA(null));
+      return;
+    }
+    queueMicrotask(() => setCompareBidA(null));
+    const controller = new AbortController();
+    apiPostAuth<DraftPlayerBid, { playerId: string; config: DraftConfigServer; picks: DraftPick[] }>(
+      "/api/draft/players/bid",
+      { playerId: compareAId, config, picks },
+      undefined,
+      controller.signal,
+    )
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setCompareBidA(res.recommendedBid);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setCompareBidA(null);
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, config, compareAId]);
+
+  useEffect(() => {
+    if (!authed || !config || !compareBId) {
+      queueMicrotask(() => setCompareBidB(null));
+      return;
+    }
+    queueMicrotask(() => setCompareBidB(null));
+    const controller = new AbortController();
+    apiPostAuth<DraftPlayerBid, { playerId: string; config: DraftConfigServer; picks: DraftPick[] }>(
+      "/api/draft/players/bid",
+      { playerId: compareBId, config, picks },
+      undefined,
+      controller.signal,
+    )
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setCompareBidB(res.recommendedBid);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setCompareBidB(null);
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, config, compareBId]);
+
+  // bid 가 채워진 선수 객체 — ComparisonPanel / PlayerComparisonModal / AI 추천 모두 동일한 객체 사용.
+  const selectedAWithBid = useMemo(
+    () => (selectedA ? { ...selectedA, recommendedBid: compareBidA } : null),
+    [selectedA, compareBidA],
+  );
+  const selectedBWithBid = useMemo(
+    () => (selectedB ? { ...selectedB, recommendedBid: compareBidB } : null),
+    [selectedB, compareBidB],
+  );
 
   // Toggle player selection for A/B comparison (max 2 players).
   // 타자/투수 혼합 비교는 차단하고 토스트로 안내한다.
@@ -1274,8 +1345,8 @@ export default function DraftPage() {
       />
 
       <ComparisonPanel
-        selectedA={selectedA}
-        selectedB={selectedB}
+        selectedA={selectedAWithBid}
+        selectedB={selectedBWithBid}
         authed={authed}
         onClearA={clearCompareA}
         onClearB={clearCompareB}
@@ -1342,9 +1413,9 @@ export default function DraftPage() {
       )}
 
       <PlayerComparisonModal
-        open={comparisonOpen && Boolean(selectedA) && Boolean(selectedB)}
-        playerA={selectedA}
-        playerB={selectedB}
+        open={comparisonOpen && Boolean(selectedAWithBid) && Boolean(selectedBWithBid)}
+        playerA={selectedAWithBid}
+        playerB={selectedBWithBid}
         onClose={() => setComparisonOpen(false)}
       />
 
