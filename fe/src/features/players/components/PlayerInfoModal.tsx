@@ -297,13 +297,6 @@ export default function PlayerInfoModal({ open, playerId, playerType = "batter",
               </div>
             </section>
 
-            <section>
-              <div className="mb-2 text-sm font-black uppercase tracking-wide text-white/55">Career History (MLB)</div>
-              <div className="rounded-xl border border-white/10 bg-[#0f1424] p-4 text-sm text-white/70">
-                Planned for development in V2.
-              </div>
-            </section>
-
             {twoWay && (
               <section>
                 <div className="mb-2 text-sm font-black uppercase tracking-wide text-white/55">Two-Way Player Profile</div>
