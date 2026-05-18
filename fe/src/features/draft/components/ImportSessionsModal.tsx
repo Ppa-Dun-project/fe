@@ -10,8 +10,6 @@ type Props = {
   onClose: () => void;
   onPick: (id: number) => void;
   onDelete: (id: number) => void;
-  // 옛 세션을 새 target_season 으로 복제하는 keeper 흐름 진입점.
-  onClone: (session: SessionSummary) => void;
 };
 
 export default function ImportSessionsModal({
@@ -20,7 +18,6 @@ export default function ImportSessionsModal({
   onClose,
   onPick,
   onDelete,
-  onClone,
 }: Props) {
   return (
     <div className="fixed inset-0 z-[80] grid place-items-center p-4">
@@ -67,15 +64,6 @@ export default function ImportSessionsModal({
                   <div className="mt-0.5 text-xs text-white/55">
                     {s.createdAt.slice(0, 10)}
                   </div>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onClone(s)}
-                  aria-label="Clone for new season"
-                  title="Clone for new season"
-                  className="grid h-9 w-9 place-items-center rounded-xl border border-emerald-400/30 bg-emerald-500/10 text-emerald-200 transition hover:bg-emerald-500/20"
-                >
-                  ⎘
                 </button>
                 <button
                   type="button"
