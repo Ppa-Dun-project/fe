@@ -258,11 +258,6 @@ export default function DraftPage() {
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
-  // Clone-for-new-season: 사용자가 Import 모달에서 특정 세션을 새 target_season 으로 복제.
-  const [cloneSource, setCloneSource] = useState<SessionSummary | null>(null);
-  const [cloneTargetSeasonStr, setCloneTargetSeasonStr] = useState<string>("");
-  const [cloneSubmitting, setCloneSubmitting] = useState(false);
-  const [cloneError, setCloneError] = useState<string | null>(null);
 
   const rosterSize = useMemo(
     () => clampRosterSize(config?.rosterPlayers),
@@ -1195,61 +1190,6 @@ export default function DraftPage() {
       });
   };
 
-  // ── Clone-for-new-season 핸들러 ──
-  const openCloneModal = (source: SessionSummary) => {
-    setCloneSource(source);
-    setCloneTargetSeasonStr(String(new Date().getFullYear() + 1));
-    setCloneError(null);
-  };
-
-  const closeCloneModal = () => {
-    if (cloneSubmitting) return;
-    setCloneSource(null);
-    setCloneError(null);
-  };
-
-  // 옛 세션을 GET → config·picks 그대로 + 새 targetSeason 박아서 POST.
-  // 픽의 contractCode/signedSeason 은 그대로 (rollover 는 표시 시점에 동적 계산).
-  // X 로 떨어진 선수도 보드에 그대로 옴 — 사용자가 보드에서 수동 제거.
-  const handleSessionClone = () => {
-    if (!cloneSource) return;
-    const targetSeason = Number(cloneTargetSeasonStr);
-    if (!Number.isFinite(targetSeason) || targetSeason < 2020 || targetSeason > 2100) {
-      setCloneError("Enter a season between 2020 and 2100.");
-      return;
-    }
-
-    setCloneSubmitting(true);
-    setCloneError(null);
-
-    apiGetAuth<SessionDetail>(`/api/draft/sessions/${cloneSource.id}`)
-      .then((src) => {
-        const newConfig: DraftConfigServer = {
-          ...src.config,
-          targetSeason,
-        };
-        const newName = `${src.name} - ${targetSeason}`;
-        return apiPostAuth<
-          SessionDetail,
-          { name: string; config: DraftConfigServer; picks: DraftPick[] }
-        >("/api/draft/sessions", {
-          name: newName,
-          config: newConfig,
-          picks: src.picks,
-        });
-      })
-      .then((created) => {
-        setCloneSource(null);
-        closeImportModal();
-        navigate(`/draft/${created.id}`);
-      })
-      .catch((err: unknown) => {
-        console.error(err);
-        setCloneError(err instanceof Error ? err.message : "Clone failed");
-      })
-      .finally(() => setCloneSubmitting(false));
-  };
-
   if (!bootstrapped || !config) {
     return (
       <div className="rounded-3xl border border-white/10 bg-white/5 p-6 text-sm text-white/70">
@@ -1469,65 +1409,6 @@ export default function DraftPage() {
           onDiscardCurrent={handleNewConfirmDiscard}
           onCancel={handleNewConfirmCancel}
         />
-      )}
-
-      {cloneSource && (
-        <div className="fixed inset-0 z-[90] grid place-items-center p-4">
-          <button
-            type="button"
-            aria-label="Close clone dialog"
-            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
-            onClick={closeCloneModal}
-          />
-          <div className="relative w-full max-w-sm rounded-3xl border border-emerald-400/25 bg-[#0c1220] p-6 shadow-2xl">
-            <div className="text-lg font-black text-white">Clone for new season</div>
-            <div className="mt-1 text-xs text-white/55">
-              Copies <span className="font-bold text-white/80">{cloneSource.name}</span> as
-              a new session — config and picks inherited. Keeper contracts roll over to
-              the new target season; expired (X) players appear on the board and you can
-              remove them manually.
-            </div>
-
-            <label className="mt-5 block text-xs font-extrabold text-white/70">
-              New target season
-            </label>
-            <input
-              type="number"
-              inputMode="numeric"
-              min={2020}
-              max={2100}
-              value={cloneTargetSeasonStr}
-              onChange={(e) => setCloneTargetSeasonStr(e.target.value)}
-              disabled={cloneSubmitting}
-              className="mt-2 w-full rounded-2xl border border-white/10 bg-black/30 px-4 py-3 text-sm text-white outline-none transition hover:border-white/30 focus:border-emerald-400/40 no-spinner disabled:opacity-50"
-            />
-
-            {cloneError && (
-              <div className="mt-3 rounded-xl bg-rose-500/15 px-3 py-2 text-xs font-bold text-rose-200">
-                {cloneError}
-              </div>
-            )}
-
-            <div className="mt-6 flex gap-3">
-              <button
-                type="button"
-                onClick={closeCloneModal}
-                disabled={cloneSubmitting}
-                className="flex-1 rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm font-black text-white/75 transition hover:bg-white/10 disabled:opacity-50"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleSessionClone}
-                disabled={cloneSubmitting}
-                className="flex-1 rounded-2xl bg-emerald-500 px-4 py-3 text-sm font-black text-white transition hover:bg-emerald-400 disabled:opacity-50"
-              >
-                {cloneSubmitting ? "Cloning..." : "Create"}
-              </button>
-            </div>
-          </div>
-        </div>
       )}
 
       <Modal
