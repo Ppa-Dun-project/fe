@@ -70,7 +70,16 @@ type PlayerDetailResponse = {
   headshotUrl?: string | null;
   batterStats?: BatterStats | null;
   pitcherStats?: PitcherStats | null;
+  // MLB 팀의 (team, position) 안에서 이 선수의 뎁스 차트 순서. 1=starter. null=미정.
+  depth_order?: number | null;
 };
+
+function formatDepthOrder(order: number | null | undefined): { value: string; label: string } {
+  if (order === null || order === undefined) return { value: "—", label: "Unknown" };
+  if (order === 1) return { value: "1", label: "Starter" };
+  if (order === 2) return { value: "2", label: "Backup" };
+  return { value: String(order), label: "Reserve" };
+}
 
 const HITTER_POSITIONS = new Set([
   "C",
@@ -250,6 +259,29 @@ export default function PlayerInfoModal({ open, playerId, playerType = "batter",
                   </div>
                 ))}
               </div>
+            </section>
+
+            <section>
+              <div className="mb-2 text-sm font-black uppercase tracking-wide text-white/55">Depth Chart</div>
+              {(() => {
+                const depth = formatDepthOrder(detail.depth_order);
+                const knownDepth = detail.depth_order !== null && detail.depth_order !== undefined;
+                return (
+                  <div className="flex items-center gap-4 rounded-xl border border-white/10 bg-[#0f1424] p-4">
+                    <div className="grid h-16 w-16 place-items-center rounded-2xl border border-emerald-400/30 bg-emerald-500/10 text-3xl font-black text-emerald-300">
+                      {depth.value}
+                    </div>
+                    <div className="flex-1">
+                      <div className="text-base font-black text-white">{depth.label}</div>
+                      <div className="mt-0.5 text-xs text-white/55">
+                        {knownDepth
+                          ? `${detail.team} ${detail.positions[0] ?? ""} depth order`.trim()
+                          : "Depth order not available for this player."}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
             </section>
 
             <section>

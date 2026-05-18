@@ -19,9 +19,10 @@ type Props = {
   group: StatGroup;
   cols: StatSlot[];
   onChange: (next: StatSlot[]) => void;
+  onReset: () => void;
 };
 
-export default function StatPickerStrip({ group, cols, onChange }: Props) {
+export default function StatPickerStrip({ group, cols, onChange, onReset }: Props) {
   const [draggingIdx, setDraggingIdx] = useState<number | null>(null);
   const [hoverIdx, setHoverIdx] = useState<number | null>(null);
 
@@ -64,8 +65,18 @@ export default function StatPickerStrip({ group, cols, onChange }: Props) {
         <div className="text-xs font-black uppercase tracking-wider text-white/55">
           {group === "batter" ? "Batter Stats" : "Pitcher Stats"}
         </div>
-        <div className="text-xs font-black text-white/55">
-          {filledCount} / {STAT_COLUMN_COUNT} selected
+        <div className="flex items-center gap-3">
+          <div className="text-xs font-black text-white/55">
+            {filledCount} / {STAT_COLUMN_COUNT} selected
+          </div>
+          <button
+            type="button"
+            onClick={onReset}
+            title={`Reset ${group === "batter" ? "batter" : "pitcher"} stats to defaults`}
+            className="rounded-full border border-white/10 bg-black/30 px-2.5 py-0.5 text-xs font-extrabold text-white/70 transition hover:bg-white/10"
+          >
+            Reset
+          </button>
         </div>
       </div>
 

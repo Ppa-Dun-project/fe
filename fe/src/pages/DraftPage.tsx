@@ -194,7 +194,7 @@ export default function DraftPage() {
   const sortOptions = showingPitcherColumns ? PITCHER_SORT_OPTIONS : BATTER_SORT_OPTIONS;
 
   // 사용자가 선택한 5개 스탯 (타자/투수 별도) — localStorage에 영구 저장.
-  const { batterCols, pitcherCols, setBatterCols, setPitcherCols } = useStatColumns();
+  const { batterCols, pitcherCols, setBatterCols, setPitcherCols, resetToDefaults: resetStatColumns } = useStatColumns();
   const activeStatKeys = showingPitcherColumns ? pitcherCols : batterCols;
   // 슬롯이 null 이면 헤더 라벨도 빈 문자열 — 좌우 컬럼이 안 밀리도록.
   const statColumnLabels = activeStatKeys.map((k) => (k ? getStatDef(k)?.label ?? k : ""));
@@ -1358,6 +1358,7 @@ export default function DraftPage() {
         group={showingPitcherColumns ? "pitcher" : "batter"}
         cols={showingPitcherColumns ? pitcherCols : batterCols}
         onChange={showingPitcherColumns ? setPitcherCols : setBatterCols}
+        onReset={() => resetStatColumns(showingPitcherColumns ? "pitcher" : "batter")}
       />
 
       <PlayerListTable
