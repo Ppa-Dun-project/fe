@@ -15,7 +15,6 @@ import type {
   DraftTeam,
 } from "../../../types/draft";
 import {
-  draftCostClass,
   getPlayerDraftStatus,
   mlbTeamBadgeClass,
   teamAccentClass,
@@ -77,11 +76,10 @@ export default function PlayerListTable({
   return (
     <FadeIn delayMs={140}>
       <section className="overflow-hidden rounded-3xl border border-white/10 bg-white/5">
-        <div className="grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] bg-black/40 px-4 py-3 text-xs font-extrabold text-white/60">
+        <div className="grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_1.3fr_1.1fr_.9fr] bg-black/40 px-4 py-3 text-xs font-extrabold text-white/60">
           <div className="text-center">#</div>
           <div>Player</div>
           <div className="text-center">Pos</div>
-          <div className="text-center">Cost</div>
           <div className="text-center">Team</div>
           <div className="text-center">{statColumnLabels[0]}</div>
           <div className="text-center">{statColumnLabels[1]}</div>
@@ -130,7 +128,7 @@ export default function PlayerListTable({
                 <div
                   key={player.id}
                   className={[
-                    "grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_.9fr_1.3fr_1.1fr_.9fr] items-center px-4 py-3 text-sm text-white/85 transition tabular-nums",
+                    "grid grid-cols-[.4fr_1.8fr_.6fr_.8fr_.8fr_.8fr_.8fr_.8fr_.8fr_1.3fr_1.1fr_.9fr] items-center px-4 py-3 text-sm text-white/85 transition tabular-nums",
                     compareActive
                       ? "relative z-[1] my-1 rounded-xl border border-emerald-400/75 bg-emerald-500/10 shadow-[0_0_18px_rgba(16,185,129,0.35)]"
                       : "hover:bg-white/5",
@@ -191,8 +189,6 @@ export default function PlayerListTable({
                       {player.positions[0]}
                     </span>
                   </div>
-
-                  <div className={`text-center ${draftCostClass(authed)}`}>${player.recommendedBid ?? "—"}</div>
 
                   <div className="text-center">
                     <span

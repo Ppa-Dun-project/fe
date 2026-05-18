@@ -24,6 +24,7 @@ import type {
   DraftPick,
   DraftPickKind,
   DraftPlayer,
+  DraftPlayerBid,
   DraftPlayerPublic,
   DraftPlayerValue,
   DraftPositionFilter,
@@ -212,6 +213,9 @@ export default function DraftPage() {
   const [boardView, setBoardView] = useState<DraftPickKind>("main");
 
   const [addTarget, setAddTarget] = useState<DraftPlayer | null>(null);
+  // Add 모달이 열릴 때 즉석에서 단건 호출하는 추천 bid + 그 in-flight 상태.
+  const [addTargetBid, setAddTargetBid] = useState<number | null>(null);
+  const [addTargetBidLoading, setAddTargetBidLoading] = useState(false);
   const [takenTarget, setTakenTarget] = useState<DraftPlayer | null>(null);
 
   // 메모 — playerId → note. 로드 모드에서만 fetch/저장 동작 (세션 ID 필요).
@@ -290,8 +294,6 @@ export default function DraftPage() {
 
     const sorted = [...result].sort((a, b) => {
       switch (sort) {
-        case "cost_desc":
-          return (b.recommendedBid ?? 0) - (a.recommendedBid ?? 0);
         case "avg_desc":
           return primaryRateSortValue(b) - primaryRateSortValue(a);
         case "hr_desc":
@@ -370,6 +372,8 @@ export default function DraftPage() {
 
   const closeAddModal = () => {
     setAddTarget(null);
+    setAddTargetBid(null);
+    setAddTargetBidLoading(false);
   };
 
   const closeTakenModal = () => {
@@ -620,12 +624,9 @@ export default function DraftPage() {
     return () => controller.abort();
   }, [leagueQuery]);
 
-  // 인증된 사용자에게만 PPA 값 + 추천 bid 를 불러와 playerId 로 공개 목록과 머지한다.
+  // 인증된 사용자에게만 PPA 값을 불러와 playerId 로 공개 목록과 머지한다.
+  // recommendedBid 는 Add 모달이 열릴 때 단건으로 따로 호출 (POST /api/draft/players/bid).
   // 로그아웃 시 값을 즉시 지워서 UI 에 남지 않도록 함.
-  // picks/config 가 바뀔 때마다 재호출 — 잔여 예산 변동에 따라 백엔드의 추천 bid 가 갱신되기 때문.
-  // hasDraftConfig 는 의도적으로 의존하지 않음 — 로그인만 하면 (Start Draft 누르기 전에도)
-  // PPA 값이 보여야 한다. 드래프트 시작 전엔 config 가 DEFAULT_DRAFT_CONFIG 로 채워져 있어서
-  // 백엔드가 기본 예산/로스터/상대수로 추천 bid 를 계산해 돌려준다.
   useEffect(() => {
     if (!authed || !config) {
       queueMicrotask(() => setPlayerValues(null));
@@ -634,11 +635,10 @@ export default function DraftPage() {
 
     const controller = new AbortController();
 
-    apiPostAuth<DraftPlayerValuesResponse, { config: DraftConfigServer; picks: DraftPick[] }>(
-      "/api/draft/players/values",
-      { config, picks },
+    apiGetAuth<DraftPlayerValuesResponse>(
+      "/api/draft/players/value",
       undefined,
-      controller.signal
+      controller.signal,
     )
       .then((data) => {
         if (controller.signal.aborted) return;
@@ -654,7 +654,7 @@ export default function DraftPage() {
       });
 
     return () => controller.abort();
-  }, [authed, config, picks]);
+  }, [authed, config]);
 
   // Toggle player selection for A/B comparison (max 2 players).
   // 타자/투수 혼합 비교는 차단하고 토스트로 안내한다.
@@ -920,7 +920,7 @@ export default function DraftPage() {
     return true;
   };
 
-  // Add 버튼 클릭 — 메인이면 bid 모달, 마이너/택시는 바로 추가.
+  // Add 버튼 클릭 — 메인이면 bid 모달 (열면서 단건 bid fetch), 마이너/택시는 바로 추가.
   const handleAddClick = (player: DraftPlayer) => {
     if (boardView !== "main") {
       if (!myTeam) return;
@@ -929,7 +929,20 @@ export default function DraftPage() {
       }
       return;
     }
+    if (!config) return;
     openAddModal(player);
+    setAddTargetBid(null);
+    setAddTargetBidLoading(true);
+    apiPostAuth<DraftPlayerBid, { playerId: string; config: DraftConfigServer; picks: DraftPick[] }>(
+      "/api/draft/players/bid",
+      { playerId: player.id, config, picks },
+    )
+      .then((res) => setAddTargetBid(res.recommendedBid))
+      .catch((err: unknown) => {
+        console.error(err);
+        setAddTargetBid(null);
+      })
+      .finally(() => setAddTargetBidLoading(false));
   };
 
   const handleAddFinish = (bid: number, broughtUpByTeamId: string) => {
@@ -1301,6 +1314,8 @@ export default function DraftPage() {
           player={addTarget}
           teams={teams}
           remainingBudget={remainingBudget}
+          recommendedBid={addTargetBid}
+          bidLoading={addTargetBidLoading}
           onClose={closeAddModal}
           onConfirm={handleAddFinish}
         />

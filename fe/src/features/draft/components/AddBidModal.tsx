@@ -6,6 +6,9 @@ type Props = {
   player: DraftPlayer | null;
   teams: DraftTeam[];
   remainingBudget: number;
+  // 부모가 모달이 열릴 때 단건 호출로 채워 넣는 추천 bid (in-flight 동안 null + bidLoading=true).
+  recommendedBid: number | null;
+  bidLoading: boolean;
   onClose: () => void;
   onConfirm: (bid: number, broughtUpByTeamId: string) => void;
 };
@@ -15,17 +18,16 @@ export default function AddBidModal({
   player,
   teams,
   remainingBudget,
+  recommendedBid,
+  bidLoading,
   onClose,
   onConfirm,
 }: Props) {
   const myTeam = useMemo(() => teams.find((t) => t.isMine) ?? teams[0], [teams]);
-  const initialBid = useMemo(() => {
-    if (!player || typeof player.recommendedBid !== "number") return "";
-    return String(player.recommendedBid);
-  }, [player]);
 
   // 부모가 player.id 로 `key` 를 지정해 모달을 remount → useState 초기값이 매번 새로 평가됨.
-  const [bid, setBid] = useState(initialBid);
+  // bid input 은 항상 빈 문자열로 시작 — 추천값은 placeholder 로만 안내.
+  const [bid, setBid] = useState("");
   const [broughtUpByTeamId, setBroughtUpByTeamId] = useState(myTeam?.id ?? "");
   const [minBidErrorOpen, setMinBidErrorOpen] = useState(false);
   const [budgetErrorOpen, setBudgetErrorOpen] = useState(false);
@@ -132,7 +134,13 @@ export default function AddBidModal({
                   value={bid}
                   onChange={(e) => setBid(e.target.value)}
                   inputMode="numeric"
-                  placeholder="Enter winning bid"
+                  placeholder={
+                    bidLoading
+                      ? "Loading recommendation..."
+                      : recommendedBid !== null
+                        ? `Recommended: $${recommendedBid}`
+                        : "Enter winning bid"
+                  }
                   className={[
                     "w-full rounded-2xl bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35",
                     bidInputErrorOpen
@@ -167,7 +175,7 @@ export default function AddBidModal({
             <div className="border-t border-white/10 pt-4">
               <div className="text-xs font-extrabold text-white/70">Draft cost</div>
               <div className="mt-2 text-3xl font-black text-emerald-400">
-                ${player.recommendedBid ?? "—"}
+                {bidLoading ? "..." : recommendedBid !== null ? `$${recommendedBid}` : "—"}
               </div>
               <div className="mt-1 text-xs text-white/35">
                 This is the recommended draft cost baseline.
