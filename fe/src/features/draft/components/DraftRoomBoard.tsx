@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DraftPick, DraftPickKind, DraftPlayer, DraftTeam } from "../../../types/draft";
 import { MINOR_TAXI_SLOT_COUNT, isEligibleForSlot, teamAccentClass } from "../utils";
 
@@ -68,6 +68,48 @@ export default function DraftRoomBoard({
     index: number;
     ok: boolean;
   } | null>(null);
+
+  // While a drag is in progress, HTML5 native drag suppresses page scrolling.
+  // We restore it by (1) auto-scrolling when the mouse hovers the top/bottom edge
+  // of the viewport, and (2) intercepting wheel events and forwarding them to window.scrollBy.
+  useEffect(() => {
+    if (draggingFrom === null) return;
+
+    const EDGE_PX = 80;       // distance from the viewport edge that triggers auto-scroll
+    const SCROLL_STEP = 14;   // px scrolled per animation frame while the mouse stays in the edge zone
+    let scrollDir = 0;        // -1 = up, 0 = idle, 1 = down
+    let rafId = 0;
+
+    const tick = () => {
+      if (scrollDir !== 0) {
+        window.scrollBy(0, scrollDir * SCROLL_STEP);
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+
+    const onDragOver = (e: DragEvent) => {
+      const y = e.clientY;
+      const h = window.innerHeight;
+      if (y < EDGE_PX) scrollDir = -1;
+      else if (y > h - EDGE_PX) scrollDir = 1;
+      else scrollDir = 0;
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      // During HTML5 drag, the browser often blocks default wheel scrolling — drive it manually.
+      window.scrollBy(0, e.deltaY);
+    };
+
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("wheel", onWheel, { passive: true });
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("wheel", onWheel);
+    };
+  }, [draggingFrom]);
 
   // Filter picks to the current board and group them by team.
   const picksByTeam = useMemo(() => {
@@ -254,6 +296,24 @@ export default function DraftRoomBoard({
                         ? "ring-2 ring-rose-400/60"
                         : "";
 
+                      // While a drag is in progress, paint every slot with its eligibility
+                      // (green = droppable, red = not) so the user can see all valid targets
+                      // at a glance instead of hovering one at a time. The source slot is dimmed.
+                      const dragMode = draggingFrom !== null;
+                      const isSource =
+                        dragMode &&
+                        draggingFrom?.teamId === team.id &&
+                        draggingFrom?.index === slotIndex;
+                      const dragEligible =
+                        dragMode && !isSource ? isHoverEligible(team.id, slotIndex) : null;
+                      const dragTintClass =
+                        dragEligible === true
+                          ? "border-emerald-400/55 bg-emerald-500/15"
+                          : dragEligible === false
+                            ? "border-rose-400/55 bg-rose-500/12"
+                            : "";
+                      const sourceDimClass = isSource ? "opacity-40" : "";
+
                       const dndProps = {
                         onDragOver: (e: React.DragEvent) => {
                           if (draggingFrom === null) return;
@@ -323,8 +383,10 @@ export default function DraftRoomBoard({
                             {...dndProps}
                             className={[
                               // Pick card colors follow the owning team's accent — my team (sky) / each opponent's unique color.
+                              // During a drag, the team accent is replaced by the green/red eligibility tint.
                               "relative rounded-xl border px-3 py-2 text-left transition",
-                              accent.slot,
+                              dragMode && !isSource ? dragTintClass : accent.slot,
+                              sourceDimClass,
                               "cursor-grab active:cursor-grabbing",
                               hoverRingClass,
                             ].join(" ")}
@@ -369,7 +431,11 @@ export default function DraftRoomBoard({
                           key={`${team.id}-${slotIndex}`}
                           {...dndProps}
                           className={[
-                            "rounded-xl border border-dashed border-white/10 bg-black/15 px-3 py-2 text-[11px] text-white/25 transition",
+                            "rounded-xl border border-dashed px-3 py-2 text-[11px] transition",
+                            // Empty slot: neutral by default; turns green/red during a drag.
+                            dragMode
+                              ? `${dragTintClass} text-white/40`
+                              : "border-white/10 bg-black/15 text-white/25",
                             hoverRingClass,
                           ].join(" ")}
                         >
