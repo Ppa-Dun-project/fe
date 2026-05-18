@@ -13,14 +13,15 @@ type Props = {
   view: DraftPickKind;                    // 현재 보고 있는 보드
   onViewChange: (next: DraftPickKind) => void;
   onRemovePick: (pick: DraftPick) => void;
-  // 한 팀 안에서 드래그-드롭으로 슬롯 인덱스를 바꿀 때 호출. (내 팀 + 상대 팀 모두)
-  // teamId 는 드래그가 일어난 팀 — 호출자가 어떤 팀의 픽을 재배치할지 결정하는 데 사용.
-  // 마이너/택시는 자격 검사 없이 순수 재정렬.
+  // 드래그-드롭으로 슬롯/팀을 바꿀 때 호출.
+  //  - fromTeamId === toTeamId: 같은 팀 내 재정렬 (메인은 swap 까지 허용, 마이너/택시는 순수 재정렬)
+  //  - 다르면: 팀 간 이동. 메인 보드는 자격 + 빈 슬롯 검사, 마이너/택시는 자격 없이 빈 슬롯이면 OK.
   onSlotReassign?: (
+    fromTeamId: string,
     fromIndex: number,
+    toTeamId: string,
     toIndex: number,
     kind: DraftPickKind,
-    teamId: string,
   ) => void;
 };
 
@@ -102,21 +103,29 @@ export default function DraftRoomBoard({
 
   if (!authed) return null;
 
-  // 출발 슬롯의 player 가 target 슬롯에 자격이 있는지 확인 (메인만 의미 있음).
-  // 마이너/택시는 슬롯 자격 자체가 없으니 항상 OK.
-  // teamId 는 hover 대상 팀 — 출발 팀과 같지 않으면 드롭 불가.
-  const isHoverEligible = (teamId: string, toIndex: number): boolean => {
+  // 출발 슬롯의 player 가 target 슬롯에 자격이 있는지 확인.
+  //  - 같은 팀: 메인은 자격 검사 (occupied 도 swap 가능하므로 OK 표시), 마이너/택시는 항상 OK.
+  //  - 다른 팀: 빈 슬롯 + 자격 (메인) 또는 빈 슬롯 (마이너/택시) 이어야 한다.
+  const isHoverEligible = (toTeamId: string, toIndex: number): boolean => {
     if (draggingFrom === null) return false;
-    if (draggingFrom.teamId !== teamId) return false;
-    if (draggingFrom.index === toIndex) return true;
-    if (view !== "main") return true;
+    if (draggingFrom.teamId === toTeamId && draggingFrom.index === toIndex) return true;
 
-    const fromPick = (picksByTeam.get(teamId) ?? []).find(
+    const fromPick = (picksByTeam.get(draggingFrom.teamId) ?? []).find(
       (p) => p.slotIndex === draggingFrom.index
     );
     if (!fromPick) return false;
     const player = playersById[fromPick.playerId];
     if (!player) return false;
+
+    const isCrossTeam = draggingFrom.teamId !== toTeamId;
+    if (isCrossTeam) {
+      const targetOccupied = (picksByTeam.get(toTeamId) ?? []).some(
+        (p) => p.slotIndex === toIndex
+      );
+      if (targetOccupied) return false;
+    }
+
+    if (view !== "main") return true;
     const toSlotPos = effectiveSlotTemplate[toIndex];
     if (!toSlotPos) return false;
     return isEligibleForSlot(player.positions, toSlotPos);
@@ -233,8 +242,6 @@ export default function DraftRoomBoard({
                       const dndProps = {
                         onDragOver: (e: React.DragEvent) => {
                           if (draggingFrom === null) return;
-                          // 다른 팀에서 출발한 드래그는 받지 않음 — preventDefault 안 하면 "no-drop" 커서.
-                          if (draggingFrom.teamId !== team.id) return;
                           e.preventDefault();
                           e.dataTransfer.dropEffect = "move";
                           const ok = isHoverEligible(team.id, slotIndex);
@@ -265,10 +272,16 @@ export default function DraftRoomBoard({
                               teamId?: unknown;
                               slotIndex?: unknown;
                             };
-                            if (parsed.teamId !== team.id) return;
+                            if (typeof parsed.teamId !== "string") return;
                             if (typeof parsed.slotIndex !== "number") return;
                             if (!Number.isFinite(parsed.slotIndex)) return;
-                            onSlotReassign?.(parsed.slotIndex, slotIndex, view, team.id);
+                            onSlotReassign?.(
+                              parsed.teamId,
+                              parsed.slotIndex,
+                              team.id,
+                              slotIndex,
+                              view,
+                            );
                           } catch {
                             // ignore malformed payload
                           }

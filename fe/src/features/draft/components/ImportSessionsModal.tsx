@@ -10,6 +10,7 @@ type Props = {
   onClose: () => void;
   onPick: (id: number) => void;
   onDelete: (id: number) => void;
+  onCopy: (id: number) => void;
 };
 
 export default function ImportSessionsModal({
@@ -18,6 +19,7 @@ export default function ImportSessionsModal({
   onClose,
   onPick,
   onDelete,
+  onCopy,
 }: Props) {
   return (
     <div className="fixed inset-0 z-[80] grid place-items-center p-4">
@@ -64,6 +66,15 @@ export default function ImportSessionsModal({
                   <div className="mt-0.5 text-xs text-white/55">
                     {s.createdAt.slice(0, 10)}
                   </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onCopy(s.id)}
+                  aria-label="Copy session"
+                  title="Duplicate this session as a new draft"
+                  className="rounded-xl border border-sky-400/30 bg-sky-500/10 px-3 py-1.5 text-xs font-black text-sky-200 transition hover:bg-sky-500/20"
+                >
+                  Copy
                 </button>
                 <button
                   type="button"

@@ -64,7 +64,7 @@ export default function InjuredPlayersStrip() {
         title={`Injured Players (${players.length})`}
         onClose={() => setOpen(false)}
       >
-        <div className="grid max-h-[60vh] grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
+        <div className="ppadun-dropdown-scroll grid max-h-[60vh] grid-cols-1 gap-3 overflow-y-auto pr-1 sm:grid-cols-2">
           {players.map((p) => (
             <InjuredPlayerCard key={p.player_id} item={p} />
           ))}
