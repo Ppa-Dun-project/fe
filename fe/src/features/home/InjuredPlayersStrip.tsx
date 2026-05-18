@@ -38,8 +38,9 @@ export default function InjuredPlayersStrip() {
         <span className="text-xs font-bold text-white/40">{players.length} listed</span>
       </div>
 
-      {/* 카드 리스트 — flex-1 로 남은 공간 전부 채움, 넘치면 세로 스크롤 */}
-      <div className="mt-5 flex-1 space-y-3 overflow-y-auto pr-1">
+      {/* 카드 리스트 — flex-1 로 남은 공간 전부 채움, 넘치면 세로 스크롤.
+          ppadun-dropdown-scroll 클래스로 다른 스크롤 영역과 동일한 얇은 스크롤바 스타일 사용. */}
+      <div className="ppadun-dropdown-scroll mt-5 flex-1 space-y-3 overflow-y-auto pr-1">
         {players.map((p) => (
           <InjuredPlayerCard key={p.player_id} item={p} />
         ))}
