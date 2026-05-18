@@ -3,7 +3,7 @@
 // - 진입 시 GET /api/draft/sessions 로 사용자 세션 목록을 조회 →
 //   URL ?sessionId 가 있고 소유 세션이면 그 값, 없으면 가장 최근 세션을 default 로 사용
 // - 필터/정렬/검색은 전부 프론트에서 처리 (백엔드는 원시 데이터만 제공)
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import FadeIn from "../components/ui/FadeIn";
 import Skeleton from "../components/ui/Skeleton";
@@ -198,39 +198,60 @@ export default function MyTeamPage() {
   }, []);
 
   // ── 2단계: sessionId 가 결정되면 해당 세션의 My Team 데이터 로드 ──
+  // 재호출 가능하도록 콜백으로 분리 — visibilitychange 시 같은 로직으로 refetch.
+  const fetchTeam = useCallback(
+    (signal?: AbortSignal) => {
+      if (sessionId === null) return;
+      setLoading(true);
+      setError(null);
+      apiGetAuth<MyTeamPlayersResponse>(
+        "/api/my-team/players",
+        { sessionId },
+        signal,
+      )
+        .then((data) => {
+          if (signal?.aborted) return;
+          setPlayers(data.items);
+          setBudget({
+            total: data.totalBudget,
+            spent: data.spentBudget,
+            remaining: data.remainingBudget,
+          });
+        })
+        .catch((err: unknown) => {
+          if (err instanceof DOMException && err.name === "AbortError") return;
+          console.error(err);
+          setPlayers([]);
+          setError(err instanceof Error ? err.message : "Failed to load my team");
+        })
+        .finally(() => {
+          if (!signal?.aborted) setLoading(false);
+        });
+    },
+    [sessionId],
+  );
+
   useEffect(() => {
     if (sessionId === null) return;
-
     const controller = new AbortController();
-    setLoading(true);
-    setError(null);
-
-    apiGetAuth<MyTeamPlayersResponse>(
-      "/api/my-team/players",
-      { sessionId },
-      controller.signal
-    )
-      .then((data) => {
-        if (controller.signal.aborted) return;
-        setPlayers(data.items);
-        setBudget({
-          total: data.totalBudget,
-          spent: data.spentBudget,
-          remaining: data.remainingBudget,
-        });
-      })
-      .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === "AbortError") return;
-        console.error(err);
-        setPlayers([]);
-        setError(err instanceof Error ? err.message : "Failed to load my team");
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setLoading(false);
-      });
-
+    fetchTeam(controller.signal);
     return () => controller.abort();
-  }, [sessionId]);
+  }, [sessionId, fetchTeam]);
+
+  // 탭 전환 / 페이지 재가시화 시 최신 픽 데이터로 refetch.
+  // DraftPage 의 auto-save 가 푸시한 결과를 즉시 반영 — 두 페이지를 오갈 때 stale 방지.
+  useEffect(() => {
+    if (sessionId === null) return;
+    const onVisible = () => {
+      if (document.visibilityState === "visible") fetchTeam();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    window.addEventListener("focus", onVisible);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisible);
+      window.removeEventListener("focus", onVisible);
+    };
+  }, [sessionId, fetchTeam]);
 
   // ── 3단계 (unsaved 모드): 미저장 드래프트 → public players + values 로 합성 ──
   // 백엔드 /api/my-team/players 는 저장된 세션만 알기 때문에, Save 전 픽은

@@ -78,6 +78,7 @@ import PlayerComparisonModal from "../features/draft/components/PlayerComparison
 import PlayerNotePopover from "../features/draft/components/PlayerNotePopover";
 import StatPickerStrip from "../features/draft/components/StatPickerStrip";
 import SaveSessionModal from "../features/draft/components/SaveSessionModal";
+import RenameSessionModal from "../features/draft/components/RenameSessionModal";
 import NewDraftConfirmModal from "../features/draft/components/NewDraftConfirmModal";
 import ImportSessionsModal from "../features/draft/components/ImportSessionsModal";
 import CopySessionModal from "../features/draft/components/CopySessionModal";
@@ -274,6 +275,12 @@ export default function DraftPage() {
   const [saveNameInput, setSaveNameInput] = useState("");
   const [saveError, setSaveError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+
+  // Rename 모달 — 로드된 세션의 이름 변경 전용.
+  const [renameModalOpen, setRenameModalOpen] = useState(false);
+  const [renameInput, setRenameInput] = useState("");
+  const [renameError, setRenameError] = useState<string | null>(null);
+  const [renameSaving, setRenameSaving] = useState(false);
   const [importModalOpen, setImportModalOpen] = useState(false);
 
   const rosterSize = useMemo(
@@ -1060,6 +1067,111 @@ export default function DraftPage() {
     setSaveModalOpen(true);
   };
 
+  // Save 버튼 — 로드된 세션이면 이름 입력 없이 곧바로 PUT, 성공 시 토스트.
+  // 미저장(신규) 모드는 기존 흐름 그대로 SaveSessionModal 을 띄움.
+  const handleSaveClick = () => {
+    if (!isLoadedMode || sessionId === null || !config || !sessionName) {
+      openSaveModal();
+      return;
+    }
+    setSaving(true);
+    apiPutAuth<SessionDetail, { name: string; picks: DraftPick[] }>(
+      `/api/draft/sessions/${sessionId}`,
+      { name: sessionName, picks },
+    )
+      .then((data) => {
+        setSessionName(data.name);
+        pushToast("Session saved.", "success");
+      })
+      .catch((err: unknown) => {
+        console.error(err);
+        pushToast(
+          err instanceof Error ? `Save failed: ${err.message}` : "Save failed.",
+          "error",
+        );
+      })
+      .finally(() => setSaving(false));
+  };
+
+  // 펜슬 아이콘 → rename 모달.
+  const openRenameModal = () => {
+    setRenameInput(sessionName ?? "");
+    setRenameError(null);
+    setRenameModalOpen(true);
+  };
+
+  const closeRenameModal = () => {
+    if (renameSaving) return;
+    setRenameModalOpen(false);
+    setRenameError(null);
+  };
+
+  const handleRenameConfirm = () => {
+    if (sessionId === null) return;
+    const next = renameInput.trim();
+    if (!next) {
+      setRenameError("Name cannot be empty");
+      return;
+    }
+    if (next === sessionName) {
+      // 변경 없음 — 그냥 닫기.
+      setRenameModalOpen(false);
+      return;
+    }
+    setRenameSaving(true);
+    setRenameError(null);
+    apiPutAuth<SessionDetail, { name: string; picks: DraftPick[] }>(
+      `/api/draft/sessions/${sessionId}`,
+      { name: next, picks },
+    )
+      .then((data) => {
+        setSessionName(data.name);
+        setRenameModalOpen(false);
+        pushToast("Session renamed.", "success");
+      })
+      .catch((err: unknown) => {
+        console.error(err);
+        setRenameError(err instanceof Error ? err.message : "Rename failed");
+      })
+      .finally(() => setRenameSaving(false));
+  };
+
+  // 로드된 세션에서 픽이 바뀌면 500ms 디바운스 후 백그라운드 PUT.
+  // 목적: MyTeam 페이지가 DB 를 조회할 때 최신 픽이 반영되도록 (실시간 동기화).
+  // 첫 마운트 / 세션 전환 직후 bootstrap 이 picks 를 세팅하는 시점은 skip.
+  const autoSaveTimerRef = useRef<number | null>(null);
+  const skipFirstAutoSaveRef = useRef(true);
+
+  useEffect(() => {
+    skipFirstAutoSaveRef.current = true;
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (!isLoadedMode || sessionId === null || !config || !sessionName) return;
+    if (skipFirstAutoSaveRef.current) {
+      skipFirstAutoSaveRef.current = false;
+      return;
+    }
+    if (autoSaveTimerRef.current !== null) {
+      window.clearTimeout(autoSaveTimerRef.current);
+    }
+    autoSaveTimerRef.current = window.setTimeout(() => {
+      apiPutAuth<SessionDetail, { name: string; picks: DraftPick[] }>(
+        `/api/draft/sessions/${sessionId}`,
+        { name: sessionName, picks },
+      ).catch((err: unknown) => {
+        console.error("Auto-save failed:", err);
+      });
+      autoSaveTimerRef.current = null;
+    }, 500);
+    return () => {
+      if (autoSaveTimerRef.current !== null) {
+        window.clearTimeout(autoSaveTimerRef.current);
+        autoSaveTimerRef.current = null;
+      }
+    };
+  }, [picks, isLoadedMode, sessionId, sessionName, config]);
+
   const closeSaveModal = () => {
     setSaveModalOpen(false);
     setSaveError(null);
@@ -1301,9 +1413,10 @@ export default function DraftPage() {
         onRedo={redoPicks}
         onDiscard={handleDiscardDraft}
         onNew={handleNewDraft}
-        onSave={openSaveModal}
+        onSave={handleSaveClick}
         onImport={openImportModal}
         onStartDraft={openStartDraft}
+        onRename={openRenameModal}
       />
 
       <FadeIn delayMs={60}>
@@ -1465,6 +1578,20 @@ export default function DraftPage() {
           saving={saving}
           onCancel={closeSaveModal}
           onConfirm={handleSaveConfirm}
+        />
+      )}
+
+      {renameModalOpen && (
+        <RenameSessionModal
+          nameInput={renameInput}
+          onChangeName={(next) => {
+            setRenameInput(next);
+            if (renameError) setRenameError(null);
+          }}
+          error={renameError}
+          saving={renameSaving}
+          onCancel={closeRenameModal}
+          onConfirm={handleRenameConfirm}
         />
       )}
 
