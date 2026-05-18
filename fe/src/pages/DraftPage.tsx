@@ -243,28 +243,30 @@ export default function DraftPage() {
   // 메모 — playerId → note. 로드 모드에서만 fetch/저장 동작 (세션 ID 필요).
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [noteTarget, setNoteTarget] = useState<DraftPlayer | null>(null);
-  // 15초마다 백엔드 알림 폴링. 한 cycle 의 새 이벤트는 각각 토스트로 띄운다 —
-  // 10초씩 화면에 머무름. 단 11개 이상 들어오면 위쪽 토스트 stack 이 화면을 다 덮어
-  // 사용자가 정보 확인을 못 하므로 최신 10개만 띄우고 나머지는 summary 한 줄로 묶는다.
+  // 15초마다 백엔드 알림 폴링. 한 cycle 의 새 이벤트마다 토스트 (각 10초간 표시).
+  // - 10개 이하: 즉시 좌르륵 모두 띄움
+  // - 11개 이상: 2초 간격으로 stagger 해서 차례차례 띄움. 한꺼번에 화면 덮는 거 방지.
+  //   setTimeout cleanup 은 의도적으로 안 함 — DraftPage unmount 시 pushToast 가
+  //   stale closure 가 되지만 React 가 unmounted setState 를 무시하므로 안전.
   useNotificationPolling((evs: NotificationEvent[]) => {
     if (evs.length === 0) return;
 
-    const HARD_CAP = 10;
-    // id 오름차순으로 들어오므로 최신 N개는 뒤쪽. cap 보다 적으면 그대로 다 표시.
-    const visible = evs.slice(-HARD_CAP);
-    const overflow = evs.length - visible.length;
+    const STAGGER_THRESHOLD = 10;
+    const STAGGER_MS = 2000;
 
-    for (const ev of visible) {
+    const showOne = (ev: NotificationEvent) => {
       const { prefix, variant } = notificationDisplay(ev.event_type);
       pushToast(`${prefix} — ${ev.message}`, variant);
+    };
+
+    if (evs.length <= STAGGER_THRESHOLD) {
+      for (const ev of evs) showOne(ev);
+      return;
     }
 
-    if (overflow > 0) {
-      pushToast(
-        `🔔 ${overflow} older notification${overflow > 1 ? "s" : ""} not shown`,
-        "info"
-      );
-    }
+    evs.forEach((ev, i) => {
+      window.setTimeout(() => showOne(ev), i * STAGGER_MS);
+    });
   }, authed);
 
   // Save / Import 모달
