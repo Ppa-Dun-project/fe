@@ -10,16 +10,28 @@ import Skeleton from "../components/ui/Skeleton";
 import Dropdown from "../components/ui/Dropdown";
 
 import type { MyTeamPlayer, MyTeamPosFilter, MyTeamSort } from "../types/myteam";
-import type { SessionSummary } from "../types/draft";
+import type {
+  DraftPlayerValue,
+  SessionSummary,
+  DraftPick,
+} from "../types/draft";
 import {
   filterMyTeam,
   formatAvg,
   sortMyTeam,
+  synthesizeUnsavedMyTeam,
 } from "../features/myteam/utils";
 import { mlbTeamBadgeClass } from "../features/draft/utils";
-import { getActiveDraftSessionId } from "../features/draft/draftHelpers";
+import {
+  getActiveDraftSessionId,
+  normalizeDraftPicks,
+  readUnsavedDraftStorage,
+  type UnsavedDraft,
+  type DraftPlayerValuesResponse,
+  type DraftPlayersResponse,
+} from "../features/draft/draftHelpers";
 import { formatPpa, ppaValueClass } from "../utils/playerValue";
-import { apiGetAuth } from "../lib/api";
+import { apiGet, apiGetAuth } from "../lib/api";
 import PlayerInfoModal from "../features/players/components/PlayerInfoModal";
 
 // 백엔드 GET /api/my-team/players 응답 타입
@@ -69,6 +81,23 @@ function formatNumber(value: number | null | undefined, digits: number) {
   return value.toFixed(digits);
 }
 
+// sessionStorage 의 미저장 드래프트 JSON 을 파싱. picks 는 옛 ID 형식을 위해 정규화.
+// 잘못된 페이로드 / 빈 picks 면 null 을 돌려서 호출부가 fallback 처리하기 쉽게.
+function parseUnsavedDraftFromStorage(): UnsavedDraft | null {
+  const raw = readUnsavedDraftStorage();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as UnsavedDraft;
+    if (!parsed?.config || !Array.isArray(parsed.picks)) return null;
+    return {
+      ...parsed,
+      picks: normalizeDraftPicks(parsed.picks as DraftPick[]),
+    };
+  } catch {
+    return null;
+  }
+}
+
 export default function MyTeamPage() {
   // URL ?sessionId — 소스 오브 트루스. 새로고침/공유 후에도 같은 세션을 보여주기 위함.
   const [searchParams, setSearchParams] = useSearchParams();
@@ -80,6 +109,11 @@ export default function MyTeamPage() {
 
   // 현재 보고 있는 세션 ID (sessions 로드 완료 후 결정됨)
   const [sessionId, setSessionId] = useState<number | null>(null);
+
+  // 미저장 드래프트 (sessionStorage `ppadun_unsaved_draft`).
+  // 활성 세션이 없을 때 fallback 으로 사용 — Draft 페이지의 실시간 픽을
+  // 백엔드 round-trip 없이 그대로 보여주기 위함.
+  const [unsavedDraft, setUnsavedDraft] = useState<UnsavedDraft | null>(null);
 
   // 선수 데이터 로딩/에러 상태
   const [loading, setLoading] = useState(false);
@@ -98,14 +132,20 @@ export default function MyTeamPage() {
   const [profilePlayerId, setProfilePlayerId] = useState<number | null>(null);
   const [profilePlayerType, setProfilePlayerType] = useState<"batter" | "pitcher">("batter");
 
-  // ── 1단계: 세션 목록 조회 + sessionId 결정 ──
+  // ── 1단계: 세션 목록 조회 + sessionId 또는 unsavedDraft 결정 ──
   // 우선순위:
   //   1) activeDraftSessionId (sessionStorage) — 사용자가 지금 Draft 페이지에서
-  //      보고 있는 세션. "My Team 은 현재 드래프트와 연동" 시맨틱.
+  //      보고 있는 저장된 세션. "My Team 은 현재 드래프트와 연동" 시맨틱.
   //   2) URL ?sessionId — 직접 링크 / 북마크 케이스 (소유 세션일 때만).
-  //   3) 그 외 → "활성 드래프트 없음" 빈 상태 (자동으로 옛 세션 불러오지 않음).
+  //   3) sessionStorage 미저장 드래프트 — DraftPage 에서 진행 중이지만 아직
+  //      Save 안 한 픽이 있으면 client-side 합성으로 표시.
+  //   4) 그 외 → "활성 드래프트 없음" 빈 상태.
   useEffect(() => {
     const controller = new AbortController();
+
+    // 미저장 드래프트는 백엔드 호출 없이 sessionStorage 만 읽으면 되므로
+    // 세션 목록 조회와 무관하게 미리 한 번 파싱.
+    const parsedUnsaved = parseUnsavedDraftFromStorage();
 
     apiGetAuth<SessionsListResponse>(
       "/api/draft/sessions",
@@ -116,11 +156,6 @@ export default function MyTeamPage() {
         if (controller.signal.aborted) return;
         const items = data.items ?? [];
         setSessions(items);
-
-        if (items.length === 0) {
-          setSessionId(null);
-          return;
-        }
 
         // activeDraftSessionId 가 유효한 소유 세션이면 최우선.
         const activeId = getActiveDraftSessionId();
@@ -133,14 +168,18 @@ export default function MyTeamPage() {
         }
 
         // 활성 드래프트가 없으면 URL 만 신뢰. 옛 stale URL 이라도 그 값이
-        // 소유 세션이면 그대로 두고 (북마크/공유 시나리오), 아니면 빈 상태.
+        // 소유 세션이면 그대로 두고 (북마크/공유 시나리오).
         const urlIdNum = urlSessionIdRaw ? Number(urlSessionIdRaw) : NaN;
         const urlIsValid =
           Number.isFinite(urlIdNum) && items.some((s) => s.id === urlIdNum);
         if (urlIsValid) {
           setSessionId(urlIdNum);
-        } else {
-          setSessionId(null);
+          return;
+        }
+
+        // 저장된 세션도, URL 도 없음 → 미저장 드래프트가 있으면 그걸로 표시.
+        if (parsedUnsaved) {
+          setUnsavedDraft(parsedUnsaved);
         }
       })
       .catch((err: unknown) => {
@@ -193,19 +232,85 @@ export default function MyTeamPage() {
     return () => controller.abort();
   }, [sessionId]);
 
+  // ── 3단계 (unsaved 모드): 미저장 드래프트 → public players + values 로 합성 ──
+  // 백엔드 /api/my-team/players 는 저장된 세션만 알기 때문에, Save 전 픽은
+  // sessionStorage 의 unsavedDraft + /api/draft/players 응답을 클라이언트에서
+  // 머지해 동일한 shape 로 만든다.
+  useEffect(() => {
+    if (unsavedDraft === null) return;
+
+    const controller = new AbortController();
+    setLoading(true);
+    setError(null);
+
+    const league = unsavedDraft.config.leagueType;
+    const playersPath =
+      league === "AL" || league === "NL"
+        ? `/api/draft/players?league=${league}`
+        : "/api/draft/players";
+
+    Promise.all([
+      apiGet<DraftPlayersResponse>(playersPath, undefined, controller.signal),
+      apiGetAuth<DraftPlayerValuesResponse>(
+        "/api/draft/players/value",
+        undefined,
+        controller.signal,
+      ).catch((err: unknown) => {
+        // values 는 부수 정보 — 실패하면 ppaValue=0 으로 표시되고 끝.
+        if (err instanceof DOMException && err.name === "AbortError") throw err;
+        console.error("Failed to load player values:", err);
+        return { items: [] as DraftPlayerValue[] };
+      }),
+    ])
+      .then(([publicResp, valuesResp]) => {
+        if (controller.signal.aborted) return;
+        const synthesized = synthesizeUnsavedMyTeam(
+          unsavedDraft,
+          publicResp.items ?? [],
+          valuesResp.items ?? [],
+        );
+        setPlayers(synthesized.items);
+        setBudget({
+          total: synthesized.totalBudget,
+          spent: synthesized.spentBudget,
+          remaining: synthesized.remainingBudget,
+        });
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setPlayers([]);
+        setError(err instanceof Error ? err.message : "Failed to load my team");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
+  }, [unsavedDraft]);
+
   // 현재 보고 있는 세션의 메타 정보 (제목 옆에 이름 표시용)
   const activeSession = useMemo(
     () => sessions?.find((s) => s.id === sessionId) ?? null,
     [sessions, sessionId]
   );
 
-  // 세션 0개 빈 상태 (sessions 로드 완료 + length === 0)
-  const noSessions = sessions !== null && sessions.length === 0;
+  // 미저장 모드에서 표시할 이름 (저장 전이라 서버 id/이름 없음).
+  const unsavedSessionLabel = unsavedDraft
+    ? `${unsavedDraft.config.myTeamName ?? "My Team"} (Unsaved Draft)`
+    : null;
+
+  // 세션 0개 빈 상태 — 미저장 드래프트가 있으면 그쪽으로 흐름이 가야 하므로 제외.
+  const noSessions =
+    sessions !== null && sessions.length === 0 && unsavedDraft === null;
   // 세션은 있지만 지금 보고 있을 활성 드래프트가 없음 (Draft 페이지에서 New/Discard
   // 후, 또는 처음 들어왔는데 URL/active 세션 없음). 옛 세션을 자동으로
   // 끌어오지 않고 명시적 안내 — "마이팀 = 현재 드래프트" 시맨틱 유지.
   const noActiveDraft =
-    sessions !== null && sessions.length > 0 && sessionId === null;
+    sessions !== null &&
+    sessions.length > 0 &&
+    sessionId === null &&
+    unsavedDraft === null;
   const sessionsLoading = sessions === null && sessionsError === null;
 
   // 클라이언트 측 필터링 + 정렬 (백엔드 재호출 없이 메모리에서 계산)
@@ -225,6 +330,11 @@ export default function MyTeamPage() {
             {activeSession && (
               <div className="mt-1 text-sm font-semibold text-white/60">
                 Session: <span className="text-white/85">{activeSession.name}</span>
+              </div>
+            )}
+            {unsavedSessionLabel && (
+              <div className="mt-1 text-sm font-semibold text-white/60">
+                Session: <span className="text-white/85">{unsavedSessionLabel}</span>
               </div>
             )}
           </div>

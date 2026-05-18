@@ -1,4 +1,94 @@
 import type { MyTeamPlayer, MyTeamPosFilter, MyTeamSort } from "../../types/myteam";
+import type {
+  DraftPick,
+  DraftPlayerPublic,
+  DraftPlayerValue,
+} from "../../types/draft";
+import type { UnsavedDraft } from "../draft/draftHelpers";
+
+// 백엔드 MyTeamPlayersResponse 와 동일한 shape (myteam.py)
+export type MyTeamSynthesized = {
+  items: MyTeamPlayer[];
+  totalBudget: number;
+  spentBudget: number;
+  remainingBudget: number;
+};
+
+// 미저장 드래프트 (sessionStorage) 를 백엔드 my-team 응답과 동일한 shape 로 합성.
+// 백엔드 pick_my_players + get_budget_summary 의 클라이언트 미러 — 저장 전이라도
+// My Team 페이지가 실시간 픽을 반영하도록.
+export function synthesizeUnsavedMyTeam(
+  unsaved: UnsavedDraft,
+  publicPlayers: DraftPlayerPublic[],
+  values: DraftPlayerValue[] | null,
+): MyTeamSynthesized {
+  // main 픽만 — 백엔드는 모든 kind 를 가져오지만 minor/taxi 는 slotPos === null
+  // 이라 pos: string 매핑이 불가능. 메인 로스터만 표시하는 게 의미적으로도 일치.
+  const mine = unsaved.picks
+    .filter((p) => p.draftedByTeamId === "team-0" && (p.kind ?? "main") === "main")
+    .sort((a, b) => a.slotIndex - b.slotIndex);
+
+  const playersById = new Map(publicPlayers.map((p) => [p.id, p]));
+  const valueById = new Map((values ?? []).map((v) => [v.playerId, v.ppaValue]));
+
+  const items: MyTeamPlayer[] = [];
+  for (const pick of mine) {
+    const player = playersById.get(pick.playerId);
+    if (!player) continue;
+
+    const item = buildMyTeamItemFromPick(pick, player, valueById.get(player.id) ?? null);
+    items.push(item);
+  }
+
+  const totalBudget = unsaved.config?.budget ?? 0;
+  const spentBudget = items.reduce((sum, p) => sum + p.cost, 0);
+  const remainingBudget = Math.max(0, totalBudget - spentBudget);
+
+  return { items, totalBudget, spentBudget, remainingBudget };
+}
+
+function buildMyTeamItemFromPick(
+  pick: DraftPick,
+  player: DraftPlayerPublic,
+  ppaValue: number | null,
+): MyTeamPlayer {
+  // SP/RP 슬롯이면 투수로 취급 (two_way 포함). 그 외엔 player.playerType 그대로.
+  const isPitcherSlot = pick.slotPos === "SP" || pick.slotPos === "RP";
+  const playerType: "batter" | "pitcher" =
+    player.playerType === "pitcher" || (player.playerType === "two_way" && isPitcherSlot)
+      ? "pitcher"
+      : "batter";
+
+  // 백엔드 mirror: BENCH 면 원본 포지션을 괄호 안에, DH/TWP 는 UTIL 로 흡수.
+  let displayPos: string;
+  if (pick.slotPos === "BENCH") {
+    const raw = player.positions[0] ?? "UTIL";
+    const original = raw === "DH" || raw === "TWP" ? "UTIL" : raw;
+    displayPos = `BENCH(${original})`;
+  } else {
+    displayPos = pick.slotPos ?? "UTIL";
+  }
+
+  return {
+    id: player.id,
+    name: player.name,
+    playerType,
+    pos: displayPos,
+    cost: pick.bid ?? 0,
+    team: player.team ?? "",
+    avg: playerType === "batter" ? player.avg ?? 0 : 0,
+    hr: playerType === "batter" ? player.hr ?? 0 : 0,
+    rbi: playerType === "batter" ? player.rbi ?? 0 : 0,
+    sb: playerType === "batter" ? player.sb ?? 0 : 0,
+    w: playerType === "pitcher" ? player.w ?? 0 : null,
+    sv: playerType === "pitcher" ? player.sv ?? 0 : null,
+    so: playerType === "pitcher" ? player.so ?? 0 : null,
+    era: playerType === "pitcher" ? Number((player.era ?? 0).toFixed(2)) : null,
+    whip: playerType === "pitcher" ? Number((player.whip ?? 0).toFixed(3)) : null,
+    ip: playerType === "pitcher" ? Number((player.ip ?? 0).toFixed(1)) : null,
+    ppaValue: ppaValue ?? 0,
+  };
+}
 
 function isPitcher(player: MyTeamPlayer) {
   return player.playerType === "pitcher";
