@@ -26,6 +26,8 @@ type Props = {
   // Start Draft = open the setup modal (or login modal if not authed).
   // Only rendered when there is no draft in progress.
   onStartDraft: () => void;
+  // 세션 이름 변경 — 로드된 세션에서만 펜슬 버튼이 노출된다.
+  onRename: () => void;
 };
 
 export default function DraftHeaderBar({
@@ -45,15 +47,32 @@ export default function DraftHeaderBar({
   onSave,
   onImport,
   onStartDraft,
+  onRename,
 }: Props) {
   return (
     <FadeIn>
       <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
         <div>
           <div className="text-sm font-black text-white/70">PPA-DUN</div>
-          <h1 className="mt-1 text-3xl font-black text-white">
-            {sessionName ?? "Draft Room"}
-          </h1>
+          <div className="mt-1 flex items-center gap-2">
+            <h1 className="text-3xl font-black text-white">
+              {sessionName ?? "Draft Room"}
+            </h1>
+            {isLoadedMode && sessionName && (
+              <button
+                type="button"
+                onClick={onRename}
+                aria-label="Rename session"
+                title="Rename session"
+                className="grid h-7 w-7 place-items-center rounded-lg border border-white/15 bg-black/25 text-white/70 transition hover:bg-white/10 hover:text-white"
+              >
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5">
+                  <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                  <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5Z" />
+                </svg>
+              </button>
+            )}
+          </div>
           {hasDraftConfig && config ? (
             <p className="mt-2 text-sm text-white/60">
               {String(config.leagueType ?? "AL").toUpperCase()} - ${config.budget} Budget - {rosterSize} Players
