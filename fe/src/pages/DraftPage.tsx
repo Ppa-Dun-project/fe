@@ -101,6 +101,24 @@ import LoginPromptModal from "../features/auth/LoginPromptModal";
 
 const PAGE_SIZE = 30;
 
+// Notification event_type → toast prefix + variant 매핑.
+// 알 수 없는 type 은 일반 알림 fallback.
+function notificationDisplay(eventType: string): {
+  prefix: string;
+  variant: ToastVariant;
+} {
+  switch (eventType) {
+    case "INJURY":
+      return { prefix: "🏥 INJURY UPDATE", variant: "injury" };
+    case "DEPTH":
+      return { prefix: "📊 DEPTH CHART UPDATE", variant: "depth" };
+    case "NEWS":
+      return { prefix: "📰 MLB NEWS", variant: "info" };
+    default:
+      return { prefix: "🔔 NOTIFICATION", variant: "info" };
+  }
+}
+
 // Pure helpers, constants, and inline response/payload types live in
 // `draftHelpers.ts` so this file stays focused on orchestration. See that
 // module for: matchesPositionFilter, isPitcherOnly, isPitcherPositionFilter,
@@ -194,9 +212,10 @@ export default function DraftPage() {
   const sortOptions = showingPitcherColumns ? PITCHER_SORT_OPTIONS : BATTER_SORT_OPTIONS;
 
   // 사용자가 선택한 5개 스탯 (타자/투수 별도) — localStorage에 영구 저장.
-  const { batterCols, pitcherCols, setBatterCols, setPitcherCols } = useStatColumns();
+  const { batterCols, pitcherCols, setBatterCols, setPitcherCols, resetToDefaults: resetStatColumns } = useStatColumns();
   const activeStatKeys = showingPitcherColumns ? pitcherCols : batterCols;
-  const statColumnLabels = activeStatKeys.map((k) => getStatDef(k)?.label ?? k);
+  // 슬롯이 null 이면 헤더 라벨도 빈 문자열 — 좌우 컬럼이 안 밀리도록.
+  const statColumnLabels = activeStatKeys.map((k) => (k ? getStatDef(k)?.label ?? k : ""));
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -207,6 +226,9 @@ export default function DraftPage() {
   const [comparisonOpen, setComparisonOpen] = useState(false);
   const [profilePlayerId, setProfilePlayerId] = useState<number | null>(null);
   const [profilePlayerType, setProfilePlayerType] = useState<"batter" | "pitcher">("batter");
+
+  // 선수 메모 저장 중 indicator — 모달의 Save 버튼 disabled / 로딩 표시용.
+  const [noteSaving, setNoteSaving] = useState(false);
 
   // 현재 보고 있는 보드 — 메인/마이너/택시. DraftRoomBoard 의 포스트잇 탭으로 전환.
   // Add/Taken 액션은 이 view 의 kind 로 픽을 생성한다.
@@ -221,34 +243,29 @@ export default function DraftPage() {
   // 메모 — playerId → note. 로드 모드에서만 fetch/저장 동작 (세션 ID 필요).
   const [notes, setNotes] = useState<Record<string, string>>({});
   const [noteTarget, setNoteTarget] = useState<DraftPlayer | null>(null);
-  const [noteSaving, setNoteSaving] = useState(false);
+  // 15초마다 백엔드 알림 폴링. 한 cycle 의 새 이벤트마다 토스트 (각 10초간 표시).
+  // - 10개 이하: 즉시 좌르륵 모두 띄움
+  // - 11개 이상: 2초 간격으로 stagger 해서 차례차례 띄움. 한꺼번에 화면 덮는 거 방지.
+  //   setTimeout cleanup 은 의도적으로 안 함 — DraftPage unmount 시 pushToast 가
+  //   stale closure 가 되지만 React 가 unmounted setState 를 무시하므로 안전.
+  useNotificationPolling((evs: NotificationEvent[]) => {
+    if (evs.length === 0) return;
 
-  // 부상/뎁스 변경 알림 받은 선수 id 집합 — 페이지 떠나기 전까지 row에 빨간 점 표시.
-  const [affectedPlayerIds, setAffectedPlayerIds] = useState<Set<string>>(new Set());
+    const STAGGER_THRESHOLD = 10;
+    const STAGGER_MS = 2000;
 
-  // 15초마다 백엔드 알림 폴링. 새 이벤트마다 toast + affectedPlayerIds 업데이트.
-  // event_type 별로 prefix와 색을 다르게 → 사용자가 한눈에 종류 파악 가능.
-  // 토스트는 8초간 유지 (기본 3.5초보다 길게) 해서 메시지 읽을 시간 확보.
-  useNotificationPolling((ev: NotificationEvent) => {
-    const isInjury = ev.event_type === "INJURY";
-    const isDepth = ev.event_type === "DEPTH";
-    const prefix = isInjury
-      ? "🏥 INJURY UPDATE"
-      : isDepth
-        ? "📊 DEPTH CHART UPDATE"
-        : "🔔 NOTIFICATION";
-    const variant: ToastVariant = isInjury
-      ? "injury"
-      : isDepth
-        ? "depth"
-        : "info";
+    const showOne = (ev: NotificationEvent) => {
+      const { prefix, variant } = notificationDisplay(ev.event_type);
+      pushToast(`${prefix} — ${ev.message}`, variant);
+    };
 
-    pushToast(`${prefix} — ${ev.message}`, variant, 8000);
+    if (evs.length <= STAGGER_THRESHOLD) {
+      for (const ev of evs) showOne(ev);
+      return;
+    }
 
-    setAffectedPlayerIds((prev) => {
-      const next = new Set(prev);
-      next.add(ev.player_id);
-      return next;
+    evs.forEach((ev, i) => {
+      window.setTimeout(() => showOne(ev), i * STAGGER_MS);
     });
   }, authed);
 
@@ -361,6 +378,11 @@ export default function DraftPage() {
   // 포지션 필터를 바꾸면 paginated `players` 에서 사라질 수 있으므로 전체 lookup 사용.
   const selectedA = compareAId ? playersById[compareAId] ?? null : null;
   const selectedB = compareBId ? playersById[compareBId] ?? null : null;
+
+  // Compare 슬롯/모달/AI 모두 recommendedBid 를 필요로 함 — 선택되는 즉시 단건 호출로 미리 채움.
+  // 같은 선수가 재선택되면 다시 안 부르고, A/B 가 비면 즉시 null 로 reset.
+  const [compareBidA, setCompareBidA] = useState<number | null>(null);
+  const [compareBidB, setCompareBidB] = useState<number | null>(null);
 
   const openAddModal = (player: DraftPlayer) => {
     setAddTarget(player);
@@ -656,6 +678,71 @@ export default function DraftPage() {
 
     return () => controller.abort();
   }, [authed, config]);
+
+  // Compare A 가 바뀔 때마다 단건 bid 호출 — Compare 슬롯/모달/AI 가 같이 사용한다.
+  // 선택이 바뀌는 순간 옛 bid 가 새 선수에게 잘못 적용되지 않도록 microtask 로 reset.
+  // picks 는 fetch payload 에만 들어가고 deps 에는 빠짐 — 픽 마다 재호출하면 비싸기 때문.
+  useEffect(() => {
+    if (!authed || !config || !compareAId) {
+      queueMicrotask(() => setCompareBidA(null));
+      return;
+    }
+    queueMicrotask(() => setCompareBidA(null));
+    const controller = new AbortController();
+    apiPostAuth<DraftPlayerBid, { playerId: string; config: DraftConfigServer; picks: DraftPick[] }>(
+      "/api/draft/players/bid",
+      { playerId: compareAId, config, picks },
+      undefined,
+      controller.signal,
+    )
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setCompareBidA(res.recommendedBid);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setCompareBidA(null);
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, config, compareAId]);
+
+  useEffect(() => {
+    if (!authed || !config || !compareBId) {
+      queueMicrotask(() => setCompareBidB(null));
+      return;
+    }
+    queueMicrotask(() => setCompareBidB(null));
+    const controller = new AbortController();
+    apiPostAuth<DraftPlayerBid, { playerId: string; config: DraftConfigServer; picks: DraftPick[] }>(
+      "/api/draft/players/bid",
+      { playerId: compareBId, config, picks },
+      undefined,
+      controller.signal,
+    )
+      .then((res) => {
+        if (controller.signal.aborted) return;
+        setCompareBidB(res.recommendedBid);
+      })
+      .catch((err: unknown) => {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        console.error(err);
+        setCompareBidB(null);
+      });
+    return () => controller.abort();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authed, config, compareBId]);
+
+  // bid 가 채워진 선수 객체 — ComparisonPanel / PlayerComparisonModal / AI 추천 모두 동일한 객체 사용.
+  const selectedAWithBid = useMemo(
+    () => (selectedA ? { ...selectedA, recommendedBid: compareBidA } : null),
+    [selectedA, compareBidA],
+  );
+  const selectedBWithBid = useMemo(
+    () => (selectedB ? { ...selectedB, recommendedBid: compareBidB } : null),
+    [selectedB, compareBidB],
+  );
 
   // Toggle player selection for A/B comparison (max 2 players).
   // 타자/투수 혼합 비교는 차단하고 토스트로 안내한다.
@@ -1274,8 +1361,8 @@ export default function DraftPage() {
       />
 
       <ComparisonPanel
-        selectedA={selectedA}
-        selectedB={selectedB}
+        selectedA={selectedAWithBid}
+        selectedB={selectedBWithBid}
         authed={authed}
         onClearA={clearCompareA}
         onClearB={clearCompareB}
@@ -1287,6 +1374,7 @@ export default function DraftPage() {
         group={showingPitcherColumns ? "pitcher" : "batter"}
         cols={showingPitcherColumns ? pitcherCols : batterCols}
         onChange={showingPitcherColumns ? setPitcherCols : setBatterCols}
+        onReset={() => resetStatColumns(showingPitcherColumns ? "pitcher" : "batter")}
       />
 
       <PlayerListTable
@@ -1305,7 +1393,6 @@ export default function DraftPage() {
         authed={authed}
         hasDraftConfig={hasDraftConfig}
         notes={notes}
-        affectedPlayerIds={affectedPlayerIds}
         compareAId={compareAId}
         compareBId={compareBId}
         onAddPick={handleAddClick}
@@ -1342,9 +1429,9 @@ export default function DraftPage() {
       )}
 
       <PlayerComparisonModal
-        open={comparisonOpen && Boolean(selectedA) && Boolean(selectedB)}
-        playerA={selectedA}
-        playerB={selectedB}
+        open={comparisonOpen && Boolean(selectedAWithBid) && Boolean(selectedBWithBid)}
+        playerA={selectedAWithBid}
+        playerB={selectedBWithBid}
         onClose={() => setComparisonOpen(false)}
       />
 
