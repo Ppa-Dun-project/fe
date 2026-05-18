@@ -671,7 +671,7 @@ export default function DraftPage() {
         : selectedA; // 둘 다 차 있으면 B 를 교체 → A 와 비교 가능해야 함
 
     if (counterpart && !arePlayersComparable(candidate, counterpart)) {
-      pushToast("타자와 투수는 함께 비교할 수 없어요.", "error");
+      pushToast("Batters and pitchers cannot be compared together.", "error");
       return;
     }
 
