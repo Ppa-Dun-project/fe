@@ -174,8 +174,8 @@ function normalizedWidth(value: number | null, other: number | null) {
   return Math.max(10, ratio);
 }
 
-// ppaValue / recommendedBid 가 반드시 유효한 숫자로 존재함을 보장하는 좁힌 타입.
-// 인증된 사용자에게만 해당 값이 제공되므로, AI 추천 호출 전에 가드가 필수.
+// A narrowed type that guarantees ppaValue / recommendedBid are present as valid numbers.
+// These values are only provided to authenticated users, so a guard is required before calling the AI recommendation endpoint.
 type DraftPlayerWithValues = DraftPlayer & { ppaValue: number; recommendedBid: number };
 
 function valuePerDollar(player: DraftPlayer) {
@@ -186,7 +186,7 @@ function valuePerDollar(player: DraftPlayer) {
   return ppa / bid;
 }
 
-// 타입 프레디케이트 — true 인 경우 호출부에서 player 가 DraftPlayerWithValues 로 좁혀진다.
+// Type predicate — when it returns true, the caller's `player` is narrowed to DraftPlayerWithValues.
 function hasValidAiInputs(player: DraftPlayer): player is DraftPlayerWithValues {
   const ppa = player.ppaValue;
   const bid = player.recommendedBid;
@@ -269,7 +269,7 @@ export default function PlayerComparisonModal({ open, playerA, playerB, onClose 
   const fetchRecommendation = useCallback(
     (signal?: AbortSignal) => {
       if (!playerA || !playerB || !aiInputsValid) return;
-      // aiInputsValid 는 memo 라서 TS 가 좁혀주지 못함 — 인라인 가드로 재확인해 타입을 좁힘.
+      // aiInputsValid is a memo, so TS can't narrow through it — re-check inline to narrow the types.
       if (!hasValidAiInputs(playerA) || !hasValidAiInputs(playerB)) return;
 
       setAiLoading(true);

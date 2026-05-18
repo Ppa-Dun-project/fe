@@ -1,20 +1,20 @@
-// PPA-DUN 값 표시를 위한 공통 유틸
-// - 이전에는 각 페이지/모달마다 .toFixed(1)과 스타일 분기가 흩어져 있었음
-// - 포매터와 스타일러를 단일 소스로 통합해 표시 정책을 한 곳에서 관리
+// Shared utilities for displaying PPA-DUN values.
+// - Previously, .toFixed(1) calls and style branching were scattered across each page/modal.
+// - Consolidates the formatter and styler into a single source so display policy lives in one place.
 
-/** PPA-DUN 값을 소수 1자리로 포맷. 없거나 유한수가 아니면 "—" 반환. */
+/** Format a PPA-DUN value to one decimal place. Returns "—" if missing or non-finite. */
 export function formatPpa(value: number | null | undefined): string {
   if (value == null || !Number.isFinite(value)) return "—";
   return value.toFixed(1);
 }
 
 /**
- * PPA-DUN 값에 적용할 Tailwind 클래스.
- * - 비로그인: 블러 + 흐린 색 (유료 정보 마스킹)
- * - 10점 이상: 에메랄드 발광 효과 (하이라이트)
- * - 그 외: 기본 에메랄드
+ * Tailwind classes to apply to a PPA-DUN value.
+ * - Unauthenticated: blur + dim color (mask paid information).
+ * - 10 or higher: emerald glow effect (highlight).
+ * - Otherwise: default emerald.
  *
- * value 는 number | null | undefined 를 모두 허용 — 인증 전/값 조회 실패 시에도 안전.
+ * value accepts number | null | undefined — safe even before auth or when value lookup fails.
  */
 export function ppaValueClass(
   value: number | null | undefined,

@@ -1,8 +1,8 @@
-// Inline 스탯 5칸 선택기. 드래프트 페이지의 Compare 패널과 PlayerListTable 사이 배치.
-// 항상 5칸이 고정되어 있고, 빈 칸은 점선 placeholder. X 는 자리를 null 로 만들고
-// + 는 첫 빈 자리를 채우므로 다른 컬럼이 좌우로 밀려나지 않는다.
-// 포지션 필터에 따라 batter / pitcher 카탈로그 자동 전환 (SP/RP → pitcher).
-// 변경은 즉시 useStatColumns 훅 → localStorage 로 반영된다.
+// Inline 5-slot stat picker. Placed between the draft page's Compare panel and the PlayerListTable.
+// The 5 slots are always fixed; empty slots show a dashed placeholder. X turns a slot into null and
+// + fills the first empty slot, so other columns never shift left or right.
+// Switches between batter / pitcher catalogs automatically based on the position filter (SP/RP → pitcher).
+// Changes are persisted immediately via the useStatColumns hook → localStorage.
 
 import { useState } from "react";
 import type { StatSlot } from "../useStatColumns";
@@ -34,14 +34,14 @@ export default function StatPickerStrip({ group, cols, onChange, onReset }: Prop
   const allInGroup = getStatsForGroup(group);
   const available = allInGroup.filter((s) => !slots.includes(s.key));
 
-  // X 클릭: 해당 슬롯을 null 로 바꿈 (자리는 유지).
+  // X click: replace that slot with null (the slot itself stays in place).
   const clearSlot = (slotIdx: number) => {
     const next = [...slots];
     next[slotIdx] = null;
     onChange(next);
   };
 
-  // 첫 빈 슬롯에 채워 넣음.
+  // Fill the first empty slot.
   const addKey = (key: string) => {
     const firstEmpty = slots.findIndex((s) => s === null);
     if (firstEmpty === -1) return;
@@ -50,7 +50,7 @@ export default function StatPickerStrip({ group, cols, onChange, onReset }: Prop
     onChange(next);
   };
 
-  // 5칸 사이 swap — 빈 칸 ↔ 빈 칸도 의미 없으니 그냥 swap.
+  // Swap between the 5 slots — even empty ↔ empty is harmless, so we just swap.
   const swap = (from: number, to: number) => {
     if (from === to || from < 0 || to < 0) return;
     if (from >= slots.length || to >= slots.length) return;
@@ -80,7 +80,7 @@ export default function StatPickerStrip({ group, cols, onChange, onReset }: Prop
         </div>
       </div>
 
-      {/* 5 fixed slots — 빈 칸은 점선 placeholder, 채워진 칸은 chip. 드래그로 swap. */}
+      {/* 5 fixed slots — empty slots are dashed placeholders; filled slots are chips. Drag to swap. */}
       <div className="mt-2 flex flex-wrap gap-2">
         {slots.map((key, idx) => {
           const def = key ? getStatDef(key) : null;
@@ -162,7 +162,7 @@ export default function StatPickerStrip({ group, cols, onChange, onReset }: Prop
         })}
       </div>
 
-      {/* 사용 가능한 나머지 — 클릭으로 첫 빈 슬롯 채움. */}
+      {/* Remaining available stats — click to fill the first empty slot. */}
       {available.length > 0 && (
         <div className="mt-3 flex flex-wrap gap-1.5 border-t border-white/5 pt-3">
           {available.map((s) => {

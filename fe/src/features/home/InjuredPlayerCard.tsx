@@ -1,12 +1,12 @@
 import type { InjuredPlayer } from "../../types/home";
 
 /**
- * InjuredPlayerCard: 단일 부상 선수 카드
- * - HomePage strip(3장)과 View All popup 양쪽에서 재사용
- * - status별로 색깔 구분 (Day-To-Day → yellow, IL → orange, Out/60-Day → red)
+ * InjuredPlayerCard: a single injured-player card
+ * - Reused in both the HomePage strip (3 cards) and the View All popup
+ * - Color-coded by status (Day-To-Day → yellow, IL → orange, Out/60-Day → red)
  */
 
-// status → tailwind 클래스 매핑. 매칭 안 되는 status는 fallback 사용.
+// status → tailwind class mapping. Any unmatched status falls back to the default tone.
 const STATUS_TONE: Record<string, string> = {
   "Day-To-Day": "text-yellow-300 bg-yellow-500/10 border-yellow-500/20",
   "7-Day IL":   "text-orange-300 bg-orange-500/10 border-orange-500/20",
@@ -17,8 +17,8 @@ const STATUS_TONE: Record<string, string> = {
 };
 const FALLBACK_TONE = "text-white/60 bg-white/5 border-white/10";
 
-// MLB CDN 헤드샷 — player_id로 자동 조립.
-// 동일한 패턴이 PlayerInfoModal에서도 사용됨 (서비스 전반 일관성).
+// MLB CDN headshot — assembled automatically from player_id.
+// The same pattern is used in PlayerInfoModal (for consistency across the service).
 const headshotUrl = (id: number) =>
   `https://img.mlbstatic.com/mlb-photos/image/upload/w_120,q_auto:best/v1/people/${id}/headshot/67/current`;
 
@@ -30,7 +30,7 @@ export default function InjuredPlayerCard({ item }: Props) {
   return (
     <div className="group relative overflow-hidden rounded-2xl border border-white/10 bg-white/5 p-4 transition hover:bg-white/8 hover:-translate-y-[2px]">
       <div className="flex items-center gap-3">
-        {/* MLB 헤드샷 — onError로 깨진 이미지는 숨김 (placeholder 자리만 유지) */}
+        {/* MLB headshot — onError hides broken images (keeping only the placeholder space). */}
         <img
           src={headshotUrl(item.player_id)}
           alt=""
@@ -40,7 +40,7 @@ export default function InjuredPlayerCard({ item }: Props) {
         />
 
         <div className="min-w-0 flex-1">
-          {/* 이름 + 등번호 */}
+          {/* Name + jersey number */}
           <div className="flex items-baseline gap-2">
             <h3 className="truncate text-sm font-semibold text-white">{item.name}</h3>
             {item.primary_number && (
@@ -48,12 +48,12 @@ export default function InjuredPlayerCard({ item }: Props) {
             )}
           </div>
 
-          {/* 포지션 · 팀 */}
+          {/* Position · team */}
           <p className="mt-0.5 text-xs text-white/50">
             {item.position ?? "—"} · {item.team ?? "—"}
           </p>
 
-          {/* status 뱃지 */}
+          {/* Status badge */}
           <span
             className={`mt-2 inline-flex items-center rounded-md border px-2 py-0.5 text-[11px] font-medium ${tone}`}
           >

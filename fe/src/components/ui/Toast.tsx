@@ -6,7 +6,7 @@ export type ToastMessage = {
   id: number;
   text: string;
   variant: ToastVariant;
-  // 옵션: 기본 dismiss 시간보다 더 길게 띄우고 싶을 때 사용 (예: 알림 토스트).
+  // Optional: use when a toast should stay up longer than the default dismiss time (e.g. notification toasts).
   durationMs?: number;
 };
 
@@ -26,7 +26,7 @@ const VARIANT_CLASS: Record<ToastVariant, string> = {
 const DEFAULT_DISMISS_MS = 10000;
 
 export default function Toast({ toasts, onDismiss }: Props) {
-  // 각 toast 가 마운트되면 (개별 durationMs 또는 기본 시간 후) 자동 dismiss.
+  // Each toast auto-dismisses once mounted (after its individual durationMs or the default duration).
   useEffect(() => {
     if (toasts.length === 0) return;
     const timers = toasts.map((t) =>

@@ -71,7 +71,7 @@ type PlayerDetailResponse = {
   nationality?: string | null;
   batterStats?: BatterStats | null;
   pitcherStats?: PitcherStats | null;
-  // MLB 팀의 (team, position) 안에서 이 선수의 뎁스 차트 순서. 1=starter. null=미정.
+  // This player's depth-chart order within the MLB team's (team, position). 1=starter. null=unknown.
   depth_order?: number | null;
 };
 
@@ -138,7 +138,7 @@ export default function PlayerInfoModal({ open, playerId, playerType = "batter",
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [open, onClose]);
 
-  // 상세 API 단일 호출 — 응답에 valueScore 가 이미 포함되어 있으므로 별도 /value 호출은 불필요.
+  // Single call to the detail API — the response already includes valueScore, so a separate /value call isn't needed.
   useEffect(() => {
     if (!open || playerId === null) return;
 

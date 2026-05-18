@@ -8,7 +8,7 @@ import type {
 } from "../../types/draft";
 
 /**
- * 기본 14-슬롯 구성:
+ * Default 14-slot layout:
  *   C, 1B, 2B, 3B, SS, OF×3, UTIL, SP×2, RP×2, BENCH×3
  */
 export const DEFAULT_ROSTER_SLOTS: RosterSlotCounts = {
@@ -18,7 +18,7 @@ export const DEFAULT_ROSTER_SLOTS: RosterSlotCounts = {
   BENCH: 3,
 };
 
-/** 합계 = rosterPlayers 가 되어야 한다는 검증용. */
+/** Used for validation: the sum must equal rosterPlayers. */
 export function sumRosterSlots(slots: RosterSlotCounts): number {
   return Object.values(slots).reduce((sum, n) => sum + n, 0);
 }
@@ -33,9 +33,9 @@ export const DEFAULT_CONFIG = {
   rosterSlots: DEFAULT_ROSTER_SLOTS,
 } satisfies DraftConfigLocal;
 
-// 옵션 A: 픽 추가 시 클라이언트가 즉시 slotIndex/slotPos 결정.
-// 슬롯 인덱스 → 포지션 매핑은 백엔드와 동일한 베이스 템플릿을 그대로 사용.
-// 옛 세션 (rosterSlots 없는 경우) 의 fallback 으로 남겨둠.
+// Option A: when a pick is added, the client decides slotIndex/slotPos immediately.
+// The slot index → position mapping uses the exact same base template as the backend.
+// Kept around as a fallback for older sessions (where rosterSlots is missing).
 export const SLOT_TEMPLATE_BASE = [
   "SP", "SP", "RP", "SP", "RP",
   "C", "1B", "2B", "3B", "SS",
@@ -44,9 +44,9 @@ export const SLOT_TEMPLATE_BASE = [
   "BENCH", "BENCH", "BENCH", "BENCH", "BENCH",
 ] as const;
 
-// rosterSlots 가 있을 때 사용할 동적 슬롯 빌더.
-// 순서: SP, RP, C, 1B, 2B, 3B, SS, OF, UTIL, BENCH
-// (Draft board 가 사용자가 정한 카운트대로 슬롯을 그리도록 한다.)
+// Dynamic slot builder used when rosterSlots is present.
+// Order: SP, RP, C, 1B, 2B, 3B, SS, OF, UTIL, BENCH
+// (Lets the draft board draw slots according to the counts the user configured.)
 const SLOT_ORDER: RosterSlotPosition[] = [
   "SP", "RP", "C", "1B", "2B", "3B", "SS", "OF", "UTIL", "BENCH",
 ];
@@ -119,10 +119,10 @@ export function formatAvg(avg: number | null) {
 }
 
 /**
- * 선수의 positions 가 해당 슬롯의 position 에 대해 자격을 가지는지 확인.
- *   BENCH: 누구든 OK
- *   UTIL:  비투수면 OK (positions 에 SP/RP 만 있으면 불가)
- *   그 외 (C, 1B, 2B, 3B, SS, OF, SP, RP): 정확히 매칭
+ * Check whether the player's positions qualify for the given slot position.
+ *   BENCH: anyone is OK
+ *   UTIL:  any non-pitcher is OK (not eligible if positions contains only SP/RP)
+ *   Everything else (C, 1B, 2B, 3B, SS, OF, SP, RP): exact match required
  */
 export function isEligibleForSlot(
   playerPositions: readonly string[] | undefined,
@@ -137,10 +137,10 @@ export function isEligibleForSlot(
 }
 
 /**
- * occupied 가 아닌 슬롯 중 player 자격에 맞는 첫 인덱스를 반환.
- * 자격 매칭 우선 순위는 slotTemplate 의 등장 순서(SP, RP, C, 1B, ... BENCH).
- * → 본인 고유 포지션이 비어 있으면 그쪽 먼저, 아니면 UTIL/BENCH 로 fallback.
- * 없으면 -1.
+ * Returns the first index, among non-occupied slots, that the player is eligible for.
+ * Eligibility priority follows the order slots appear in slotTemplate (SP, RP, C, 1B, ... BENCH).
+ * → If the player's own primary position is open, fill that first; otherwise fall back to UTIL/BENCH.
+ * Returns -1 if none match.
  */
 export function findEligibleSlotIndex(
   playerPositions: readonly string[] | undefined,
@@ -155,8 +155,8 @@ export function findEligibleSlotIndex(
 }
 
 /**
- * rosterPlayers 만큼 자른 SLOT_TEMPLATE_BASE 에서 occupied 슬롯을 제외한 첫 빈 자리 인덱스.
- * 전부 차 있으면 -1 반환.
+ * Returns the index of the first empty slot in SLOT_TEMPLATE_BASE (truncated to rosterPlayers), excluding occupied slots.
+ * Returns -1 if every slot is filled.
  */
 export function findAvailableSlotIndex(rosterPlayers: number, occupied: Set<number>): number {
   const limit = Math.min(rosterPlayers, SLOT_TEMPLATE_BASE.length);
@@ -175,16 +175,16 @@ export function calculateRemainingBudget(budget: number, myTeamId: string, picks
 }
 
 /** Current draft round (1-based), capped at total rounds.
- *  마이너/택시 픽은 메인 진행도에 영향을 주지 않으므로 카운트에서 제외. */
+ *  Minor/taxi picks don't affect main draft progress, so they're excluded from the count. */
 export function calculateCurrentRound(teamCount: number, rosterSlots: number, picks: DraftPick[]) {
   const mainCount = picks.filter((p) => p.kind === "main").length;
   return Math.min(rosterSlots, Math.floor(mainCount / teamCount) + 1);
 }
 
-/** 마이너/택시 보드의 슬롯 개수. 메인과 달리 포지션 라벨 없는 평면 슬롯. */
+/** Number of slots on the minor/taxi board. Unlike main, these are flat slots with no position labels. */
 export const MINOR_TAXI_SLOT_COUNT = 8;
 
-/** 마이너/택시처럼 자격 검사가 없는 보드에서 occupied 가 아닌 첫 빈 슬롯을 반환. 없으면 -1. */
+/** For boards without eligibility checks (minor/taxi), returns the first non-occupied slot. Returns -1 if none. */
 export function findFirstEmptySlot(occupied: Set<number>, count: number): number {
   for (let i = 0; i < count; i += 1) {
     if (!occupied.has(i)) return i;
@@ -193,9 +193,9 @@ export function findFirstEmptySlot(occupied: Set<number>, count: number): number
 }
 
 /**
- * Keeper / contract 코드의 시즌 롤오버 테이블.
- * {code: [elapsed=0 일 때 상태, elapsed=1, ...]} — 끝을 넘긴 elapsed 는 모두 "X" 로 떨어진다.
- * 백엔드 be/contract_rollover.py 의 _ROLLOVER_TABLE 과 1:1 동기화되어야 한다.
+ * Season rollover table for keeper / contract codes.
+ * {code: [state when elapsed=0, elapsed=1, ...]} — any elapsed value past the end falls to "X".
+ * Must stay 1:1 in sync with the backend's _ROLLOVER_TABLE in be/contract_rollover.py.
  */
 const ROLLOVER_TABLE: Record<ContractCode, ContractCode[]> = {
   F3: ["F3", "F2", "F1"],
@@ -208,12 +208,12 @@ const ROLLOVER_TABLE: Record<ContractCode, ContractCode[]> = {
 };
 
 /**
- * 영입 당시 코드와 그동안 흐른 시즌 수로 현재 계약 상태를 계산.
- *  - code 가 null/undefined: keeper 정보 없는 옛 픽 → null 반환
- *  - yearsElapsed ≤ 0: 과거 재현 등 비정상 입력 → 원본 코드 그대로
- *  - 테이블을 넘긴 elapsed: "X" (만료)
+ * Compute the current contract state from the code at acquisition time and how many seasons have passed.
+ *  - code is null/undefined: an older pick without keeper info → returns null
+ *  - yearsElapsed ≤ 0: abnormal input (e.g. replaying the past) → returns the original code unchanged
+ *  - elapsed past the table length: "X" (expired)
  *
- * 픽을 실제로 제외할지는 호출자(import preview UI)가 결정한다.
+ * Whether to actually exclude the pick is decided by the caller (the import preview UI).
  */
 export function rolledContract(
   code: ContractCode | null | undefined,
@@ -229,7 +229,7 @@ export function rolledContract(
 }
 
 /** Check if player is available, drafted by me, or taken by opponent.
- *  pickKind 와 teamId 를 함께 노출해 호출 측이 (minor)/(taxi) 프리픽스와 팀 컬러를 적용할 수 있게 한다. */
+ *  Also exposes pickKind and teamId so callers can apply the (minor)/(taxi) prefix and team color. */
 export function getPlayerDraftStatus(playerId: string, picks: DraftPick[], teams: DraftTeam[]) {
   const hit = picks.find((p) => p.playerId === playerId);
   if (!hit) return { kind: "available" as const };
@@ -242,7 +242,7 @@ export function getPlayerDraftStatus(playerId: string, picks: DraftPick[], teams
   if (pickKind !== "main") {
     const boardLabel = pickKind === "minor" ? "Minor" : "Taxi";
     return {
-      kind: hit.type, // "mine" | "taken" — 기존 분기 그대로
+      kind: hit.type, // "mine" | "taken" — same branching as before
       pickKind,
       label: `${boardLabel} - ${teamName}`,
       teamName,

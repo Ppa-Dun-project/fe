@@ -1,70 +1,70 @@
-// React Router 훅
-// - NavLink: Link와 비슷하지만 현재 URL과 일치하면 자동으로 'active' 스타일 적용
-// - useLocation: 현재 URL 가져오기
-// - useNavigate: 프로그래매틱하게 페이지 이동하는 함수 반환
+// React Router hooks
+// - NavLink: similar to Link, but automatically applies an 'active' style when its URL matches
+// - useLocation: returns the current URL
+// - useNavigate: returns a function for programmatic page navigation
 import { NavLink, useLocation, useNavigate } from "react-router-dom";
-// logout 함수와 로그인 상태 훅 가져오기 (이름 충돌 방지로 doLogout으로 별칭)
+// Import the logout function and the auth-status hook (aliased as doLogout to avoid name collisions)
 import { logout as doLogout, useAuth } from "../lib/auth";
-// useMemo: 계산 결과를 캐싱 (의존성이 바뀔 때만 재계산)
-// useState: 컴포넌트 내부 상태 관리
+// useMemo: caches a computed value (re-runs only when its dependencies change)
+// useState: manages component-local state
 import { useMemo, useState } from "react";
 import logo from "../assets/LOGO.png";
 
 /**
- * navItemClass: 네비게이션 링크의 활성/비활성 스타일 결정
- * - isActive: 현재 URL과 일치하는지 여부
+ * navItemClass: decides the active/inactive style for a nav link
+ * - isActive: whether the link matches the current URL
  */
 function navItemClass(isActive: boolean) {
   return [
     "px-3 py-2 rounded-xl text-base font-black tracking-wide transition",
-    // 활성 상태면 배경 강조, 아니면 호버 시에만 배경
+    // Emphasize background when active, otherwise show background only on hover
     isActive ? "bg-white/10 text-white" : "text-white/80 hover:text-white hover:bg-white/5",
   ].join(" ");
 }
 
 /**
- * Navbar: 상단 네비게이션 바
- * - 데스크탑: 수평 메뉴 + 로그인/로그아웃 버튼
- * - 모바일: 햄버거 메뉴 → 드로어(사이드 패널)로 열림
- * - 로그인 상태에 따라 메뉴와 버튼이 동적으로 바뀜
+ * Navbar: top navigation bar
+ * - Desktop: horizontal menu + login/logout button
+ * - Mobile: hamburger menu → opens as a drawer (side panel)
+ * - The menu items and buttons change dynamically based on auth state
  */
 export default function Navbar() {
   const navigate = useNavigate();
   const location = useLocation();
-  // 로그인 상태를 실시간으로 추적 (로그인/로그아웃 시 자동 리렌더링)
+  // Tracks the auth state in real time (automatically re-renders on login/logout)
   const authed = useAuth();
-  // 모바일 드로어 열림/닫힘 상태
+  // Mobile drawer open/closed state
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // 로그인 페이지로 이동하면서 현재 URL을 redirect 파라미터로 저장
+  // Navigate to the login page, saving the current URL as the redirect parameter
   const redirectToLogin = () => {
     const redirect = encodeURIComponent(location.pathname + location.search);
     navigate(`/login?redirect=${redirect}`);
   };
 
-  // useMemo: 메뉴 배열을 로그인 상태에 따라 계산 (authed가 바뀔 때만 재계산)
+  // useMemo: computes the menu array based on auth state (recomputes only when authed changes)
   const menu = useMemo(() => {
     const base = [
       { to: "/", label: "Home", protected: false },
       { to: "/draft", label: "Draft", protected: false },
     ];
     const protectedItems = [{ to: "/my-team", label: "My Team", protected: true }];
-    // spread 연산자(...): 배열을 펼쳐서 합침
+    // Spread operator (...): expands arrays and concatenates them
     return authed ? [...base, ...protectedItems] : base;
   }, [authed]);
 
   return (
-    // sticky top-0: 스크롤해도 상단에 고정
-    // z-40: 다른 요소보다 위에 표시
-    // backdrop-blur: 뒤 배경을 흐리게 (유리 효과)
+    // sticky top-0: pinned to the top even when scrolling
+    // z-40: displayed above other elements
+    // backdrop-blur: blurs the content behind it (glass effect)
     <header className="sticky top-0 z-40 w-full border-b border-white/10 bg-black/60 backdrop-blur">
       <div className="mx-auto w-full max-w-[1400px] px-8 py-3">
         <div className="flex items-center justify-between">
-          {/* ── 로고 + 브랜드명 (클릭하면 홈으로) ── */}
+          {/* ── Logo + brand name (clicking navigates home) ── */}
           <button
             onClick={() => {
-              setDrawerOpen(false);  // 드로어 닫기
-              navigate("/");          // 홈으로 이동
+              setDrawerOpen(false);  // Close the drawer
+              navigate("/");          // Navigate home
             }}
             className="group flex items-center gap-3 rounded-2xl border border-transparent bg-white/[0.02] p-1.5 transition hover:border-white/30 hover:bg-white/[0.09] hover:backdrop-blur-md hover:shadow-[inset_0_1px_0_rgba(255,255,255,0.22),0_0_0_1px_rgba(255,255,255,0.05)]"
             aria-label="Go to Home"
@@ -82,19 +82,19 @@ export default function Navbar() {
             </span>
           </button>
 
-          {/* ── 데스크탑 네비게이션 (md 이상에서 표시) ── */}
-          {/* hidden md:flex: 기본은 숨기고, 중간 화면 이상에서만 보이게 */}
+          {/* ── Desktop navigation (visible at md and above) ── */}
+          {/* hidden md:flex: hidden by default, shown only on medium screens and up */}
           <nav className="hidden items-center gap-2 md:flex">
             {menu.map((item) => (
               <NavLink
                 key={item.to}
                 to={item.to}
-                // className을 함수로 전달 → NavLink가 isActive 값을 넘겨줌
+                // Pass className as a function → NavLink supplies the isActive flag
                 className={({ isActive }) => navItemClass(isActive)}
                 onClick={(e) => {
-                  // 보호된 메뉴인데 비로그인이면 이동 막고 로그인 페이지로
+                  // For a protected menu item with no login, block navigation and go to the login page
                   if (item.protected && !authed) {
-                    e.preventDefault();  // 기본 이동 동작 막기
+                    e.preventDefault();  // Cancel the default navigation
                     redirectToLogin();
                   }
                 }}
@@ -104,10 +104,10 @@ export default function Navbar() {
             ))}
           </nav>
 
-          {/* ── 데스크탑 로그인/로그아웃 버튼 ── */}
+          {/* ── Desktop login/logout button ── */}
           <div className="hidden items-center gap-3 md:flex">
             {!authed ? (
-              // 비로그인: Login 버튼
+              // Logged out: Login button
               <button
                 onClick={() => navigate("/login")}
                 className="rounded-2xl bg-emerald-500 px-4 py-2 text-base font-black text-black shadow-[0_12px_30px_rgba(16,185,129,0.25)] transition hover:translate-y-[-1px] hover:bg-emerald-400 active:translate-y-0"
@@ -115,11 +115,11 @@ export default function Navbar() {
                 Login
               </button>
             ) : (
-              // 로그인: Logout 버튼
+              // Logged in: Logout button
               <button
                 onClick={() => {
-                  doLogout();                          // 토큰 삭제 + 백엔드 리셋
-                  navigate("/", { replace: true });    // 홈으로 이동 (히스토리 교체)
+                  doLogout();                          // Clear tokens + reset the backend
+                  navigate("/", { replace: true });    // Navigate home (replace history entry)
                 }}
                 className="rounded-2xl bg-emerald-500 px-4 py-2 text-base font-black text-black shadow-[0_12px_30px_rgba(16,185,129,0.25)] transition hover:translate-y-[-1px] hover:bg-emerald-400 active:translate-y-0"
               >
@@ -128,7 +128,7 @@ export default function Navbar() {
             )}
           </div>
 
-          {/* ── 모바일 햄버거 메뉴 버튼 (md 미만에서 표시) ── */}
+          {/* ── Mobile hamburger menu button (visible below md) ── */}
           <button
             className="md:hidden rounded-2xl border border-white/10 px-3 py-2 text-white/90 hover:bg-white/5 transition"
             onClick={() => setDrawerOpen(true)}
@@ -139,14 +139,14 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* ── 모바일 드로어 (햄버거 클릭 시 나타남) ── */}
-      {/* 조건부 렌더링: drawerOpen이 true일 때만 렌더링 */}
+      {/* ── Mobile drawer (appears when the hamburger is clicked) ── */}
+      {/* Conditional rendering: only rendered when drawerOpen is true */}
       {drawerOpen && (
         <div className="fixed inset-0 z-50 md:hidden">
-          {/* 배경 오버레이 (클릭하면 드로어 닫힘) */}
+          {/* Background overlay (clicking closes the drawer) */}
           <button className="absolute inset-0 bg-black/70" onClick={() => setDrawerOpen(false)} />
 
-          {/* 드로어 본체 (우측에서 슬라이드) */}
+          {/* Drawer body (slides in from the right) */}
           <div className="absolute right-0 top-0 h-full w-[82%] max-w-sm border-l border-white/10 bg-zinc-950 p-4 animate-drawerIn">
             <div className="flex items-center justify-between">
               <button
@@ -177,7 +177,7 @@ export default function Navbar() {
               </button>
             </div>
 
-            {/* 드로어 메뉴 아이템들 */}
+            {/* Drawer menu items */}
             <div className="mt-6 flex flex-col gap-2">
               {[
                 { to: "/", label: "Home", protected: false },
@@ -197,7 +197,7 @@ export default function Navbar() {
                 </button>
               ))}
 
-              {/* 드로어 하단 로그인/로그아웃 버튼 */}
+              {/* Login/logout button at the bottom of the drawer */}
               <div className="mt-4 border-t border-white/10 pt-4">
                 {!authed ? (
                   <button

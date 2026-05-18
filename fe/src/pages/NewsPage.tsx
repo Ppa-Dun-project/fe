@@ -1,20 +1,20 @@
-// Link: 페이지 이동 링크 (a 태그의 React Router 버전, 새로고침 없이 이동)
+// Link: page navigation link (React Router's version of <a>, navigates without a full reload)
 import { Link } from "react-router-dom";
 
 import FadeIn from "../components/ui/FadeIn";
 import NewsCard from "../features/home/NewsCard";
-// 하드코딩된 뉴스 데이터 (HomePage와 공용)
+// Hard-coded news data (shared with HomePage)
 import { STATIC_NEWS } from "../features/home/newsData";
 
 /**
- * NewsPage: 뉴스 전체 목록 페이지
- * - HomePage의 "View all →" 버튼으로 진입
- * - NewsCard를 재사용해서 일관된 UI 유지
+ * NewsPage: full news list page
+ * - Entered via the "View all →" button on HomePage
+ * - Reuses NewsCard for a consistent UI
  */
 export default function NewsPage() {
   return (
     <div className="space-y-6">
-      {/* 상단 헤더 */}
+      {/* Top header */}
       <FadeIn>
         <div className="flex items-center justify-between">
           <div>
@@ -23,7 +23,7 @@ export default function NewsPage() {
               Latest MLB and fantasy baseball news
             </p>
           </div>
-          {/* 홈으로 돌아가기 링크 */}
+          {/* Back-to-home link */}
           <Link
             to="/"
             className="rounded-xl border border-white/15 px-4 py-2 text-sm font-bold text-white/70 hover:text-white hover:bg-white/5 transition"
@@ -33,11 +33,11 @@ export default function NewsPage() {
         </div>
       </FadeIn>
 
-      {/* 뉴스 목록 */}
+      {/* News list */}
       <FadeIn delayMs={60}>
         <section className="rounded-3xl border border-white/10 bg-white/5 p-6">
           <div className="grid grid-cols-1 gap-4">
-            {/* 배열을 반복 렌더링 */}
+            {/* Iterate over the array and render each item */}
             {STATIC_NEWS.map((item) => (
               <NewsCard key={item.id} item={item} />
             ))}

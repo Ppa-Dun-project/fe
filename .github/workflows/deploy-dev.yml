@@ -9,6 +9,11 @@ env:
   GCP_ZONE: us-east1-b
 
 jobs:
+  test:
+    # Reuses the standalone test workflow — keeps the npm test command in one
+    # place and ensures the deploy can't run unless tests are green.
+    uses: ./.github/workflows/test.yml
+
   lint:
     runs-on: ubuntu-latest
     steps:
@@ -31,7 +36,7 @@ jobs:
         run: npm run lint
 
   build-and-deploy:
-    needs: lint
+    needs: [test, lint]
     runs-on: ubuntu-latest
 
     steps:

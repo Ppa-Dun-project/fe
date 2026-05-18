@@ -10,9 +10,9 @@ import type { RosterSlotCounts, RosterSlotPosition } from "../../types/draft";
 
 export type LeagueType = "AL" | "NL" | "custom";
 
-// 모달 안에서 재사용할 때 onSubmit 으로 동작을 override 한다.
-// (생략 시 기본 동작: sessionStorage 저장 + /draft 로 navigate)
-// embedded=true 면 카드 wrapper(section, border, padding) 없이 폼 내용만 그린다.
+// When reused inside a modal, override the behavior via onSubmit.
+// (Default behavior when omitted: save to sessionStorage and navigate to /draft.)
+// If embedded=true, renders only the form contents without the card wrapper (section, border, padding).
 export type DraftSetupConfig = {
   myTeamName: string;
   opponentsCount: number;
@@ -21,7 +21,7 @@ export type DraftSetupConfig = {
   budget: number;
   rosterPlayers: number;
   rosterSlots: RosterSlotCounts;
-  // keeper 롤오버의 기준 시즌. 픽의 contractCode/signedSeason 과 함께 계산에 사용.
+  // Reference season for keeper rollover. Used in calculations together with each pick's contractCode/signedSeason.
   targetSeason: number;
 };
 type Props = {
@@ -67,8 +67,8 @@ const POSITION_ORDER: RosterSlotPosition[] = [
   "C", "1B", "2B", "3B", "SS", "OF", "UTIL", "SP", "RP", "BENCH",
 ];
 
-// AL / NL 은 표준 16 슬롯으로 고정 (사용자가 16 안에서 배분만 가능).
-// Custom 은 완전 자유 — 최소 1 명만 채우면 OK.
+// AL / NL is fixed at the standard 16 slots (the user can only redistribute within those 16).
+// Custom is fully flexible — only needs at least 1 player to be valid.
 const TARGET_ROSTER_SIZE = sumRosterSlots(DEFAULT_ROSTER_SLOTS); // = 16
 const MIN_ROSTER_SIZE = 1;
 
@@ -97,7 +97,7 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
   const [leagueType, setLeagueType] = useState<LeagueType>("AL");
   const [budgetStr, setBudgetStr] = useState<string>("260");
   const [rosterSlots, setRosterSlots] = useState<RosterSlotCounts>(DEFAULT_ROSTER_SLOTS);
-  // 디폴트는 현재 연도 + 1. 5월 이후 새 keeper draft 를 짤 때 다음 시즌을 가리키는 게 가장 흔한 시나리오.
+  // Default is the current year + 1. The most common scenario when setting up a new keeper draft after May is to target the next season.
   const [targetSeasonStr, setTargetSeasonStr] = useState<string>(
     String(new Date().getFullYear() + 1)
   );
@@ -137,9 +137,9 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
     }));
   };
 
-  // 리그별 검증:
-  //   AL / NL → 합계 정확히 TARGET_ROSTER_SIZE (16)
-  //   custom  → 합계 ≥ MIN_ROSTER_SIZE (1)
+  // Per-league validation:
+  //   AL / NL → total must equal exactly TARGET_ROSTER_SIZE (16)
+  //   custom  → total must be ≥ MIN_ROSTER_SIZE (1)
   const isCustomLeague = leagueType === "custom";
   const rosterDelta = rosterPlayers - TARGET_ROSTER_SIZE;
   const canStart = isCustomLeague
@@ -231,7 +231,7 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
         <div>
           <label className="text-xs font-extrabold text-white/70">
             Target season{" "}
-            <span className="text-white/40">(keeper rollover 기준)</span>
+            <span className="text-white/40">(keeper rollover anchor)</span>
           </label>
           <input
             type="number"
