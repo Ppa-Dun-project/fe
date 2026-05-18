@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { DraftPick, DraftPickKind, DraftPlayer, DraftTeam } from "../../../types/draft";
 import { MINOR_TAXI_SLOT_COUNT, isEligibleForSlot, teamAccentClass } from "../utils";
 
@@ -68,6 +68,48 @@ export default function DraftRoomBoard({
     index: number;
     ok: boolean;
   } | null>(null);
+
+  // While a drag is in progress, HTML5 native drag suppresses page scrolling.
+  // We restore it by (1) auto-scrolling when the mouse hovers the top/bottom edge
+  // of the viewport, and (2) intercepting wheel events and forwarding them to window.scrollBy.
+  useEffect(() => {
+    if (draggingFrom === null) return;
+
+    const EDGE_PX = 80;       // distance from the viewport edge that triggers auto-scroll
+    const SCROLL_STEP = 14;   // px scrolled per animation frame while the mouse stays in the edge zone
+    let scrollDir = 0;        // -1 = up, 0 = idle, 1 = down
+    let rafId = 0;
+
+    const tick = () => {
+      if (scrollDir !== 0) {
+        window.scrollBy(0, scrollDir * SCROLL_STEP);
+      }
+      rafId = requestAnimationFrame(tick);
+    };
+    rafId = requestAnimationFrame(tick);
+
+    const onDragOver = (e: DragEvent) => {
+      const y = e.clientY;
+      const h = window.innerHeight;
+      if (y < EDGE_PX) scrollDir = -1;
+      else if (y > h - EDGE_PX) scrollDir = 1;
+      else scrollDir = 0;
+    };
+
+    const onWheel = (e: WheelEvent) => {
+      // During HTML5 drag, the browser often blocks default wheel scrolling — drive it manually.
+      window.scrollBy(0, e.deltaY);
+    };
+
+    document.addEventListener("dragover", onDragOver);
+    document.addEventListener("wheel", onWheel, { passive: true });
+
+    return () => {
+      cancelAnimationFrame(rafId);
+      document.removeEventListener("dragover", onDragOver);
+      document.removeEventListener("wheel", onWheel);
+    };
+  }, [draggingFrom]);
 
   // Filter picks to the current board and group them by team.
   const picksByTeam = useMemo(() => {
