@@ -227,6 +227,9 @@ export default function DraftPage() {
   const [profilePlayerId, setProfilePlayerId] = useState<number | null>(null);
   const [profilePlayerType, setProfilePlayerType] = useState<"batter" | "pitcher">("batter");
 
+  // 선수 메모 저장 중 indicator — 모달의 Save 버튼 disabled / 로딩 표시용.
+  const [noteSaving, setNoteSaving] = useState(false);
+
   // 현재 보고 있는 보드 — 메인/마이너/택시. DraftRoomBoard 의 포스트잇 탭으로 전환.
   // Add/Taken 액션은 이 view 의 kind 로 픽을 생성한다.
   const [boardView, setBoardView] = useState<DraftPickKind>("main");
