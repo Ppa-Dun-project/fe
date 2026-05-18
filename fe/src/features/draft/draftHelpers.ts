@@ -35,7 +35,6 @@ export const DEFAULT_POSITION_FILTERS: DraftPositionFilter[] = [
 
 export const BATTER_SORT_OPTIONS: { value: DraftSort; label: string }[] = [
   { value: "score_desc", label: "By Score" },
-  { value: "cost_desc",  label: "By Draft Cost" },
   { value: "avg_desc",   label: "By AVG" },
   { value: "hr_desc",    label: "By HR" },
   { value: "rbi_desc",   label: "By RBI" },
@@ -44,7 +43,6 @@ export const BATTER_SORT_OPTIONS: { value: DraftSort; label: string }[] = [
 
 export const PITCHER_SORT_OPTIONS: { value: DraftSort; label: string }[] = [
   { value: "score_desc", label: "By Score" },
-  { value: "cost_desc",  label: "By Draft Cost" },
   { value: "avg_desc",   label: "By ERA" },
   { value: "hr_desc",    label: "By SO" },
   { value: "rbi_desc",   label: "By W" },
@@ -83,6 +81,16 @@ export function isPitcherOnly(player: DraftPlayerPublic): boolean {
 
 export function isPitcherPositionFilter(filter: DraftPositionFilter): boolean {
   return filter === "SP" || filter === "RP";
+}
+
+// Compare 기능 — 같은 분류끼리만 비교 허용한다.
+// 타자/포수/유틸은 모두 playerType !== "pitcher" 이므로 한 그룹.
+// SP/RP 는 playerType === "pitcher" 그룹.
+export function arePlayersComparable(
+  a: DraftPlayerPublic,
+  b: DraftPlayerPublic,
+): boolean {
+  return isPitcherOnly(a) === isPitcherOnly(b);
 }
 
 // ── Formatters ────────────────────────────────────────────────────────
@@ -212,9 +220,7 @@ export function mergePlayersWithValues(
   const valueById = new Map(values.map((v) => [v.playerId, v]));
   return publicPlayers.map((player) => {
     const v = valueById.get(player.id);
-    return v
-      ? { ...player, ppaValue: v.ppaValue, recommendedBid: v.recommendedBid }
-      : { ...player };
+    return v ? { ...player, ppaValue: v.ppaValue } : { ...player };
   });
 }
 

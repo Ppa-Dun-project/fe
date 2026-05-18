@@ -1,6 +1,6 @@
-// Search + sort + position chips + "Customize Stats" trigger row that sits
-// above the player list. Presentation only: every value and callback flows
-// through props from DraftPage.
+// Search + sort + position chips row that sits above the player list.
+// Presentation only: every value and callback flows through props from DraftPage.
+// 스탯 종류는 ComparisonPanel 과 PlayerListTable 사이의 StatPickerStrip 에서 인라인으로 선택.
 
 import FadeIn from "../../../components/ui/FadeIn";
 import Dropdown from "../../../components/ui/Dropdown";
@@ -17,7 +17,6 @@ type Props = {
   onChangePosition: (next: DraftPositionFilter) => void;
   hasDraftConfig: boolean;
   remainingBudget: number;
-  onOpenCustomizeStats: () => void;
 };
 
 export default function PlayerSearchToolbar({
@@ -31,7 +30,6 @@ export default function PlayerSearchToolbar({
   onChangePosition,
   hasDraftConfig,
   remainingBudget,
-  onOpenCustomizeStats,
 }: Props) {
   return (
     <FadeIn delayMs={100} className="relative z-40">
@@ -77,19 +75,10 @@ export default function PlayerSearchToolbar({
           })}
 
           {hasDraftConfig && (
-            <div className="rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-300">
+            <div className="ml-auto rounded-full border border-emerald-400/30 bg-emerald-500/10 px-3 py-1 text-xs font-black text-emerald-300">
               Remaining Budget: ${remainingBudget}
             </div>
           )}
-
-          <button
-            type="button"
-            onClick={onOpenCustomizeStats}
-            className="ml-auto rounded-full border border-white/20 bg-white px-3 py-1 text-xs font-extrabold text-zinc-900 transition hover:bg-zinc-100"
-            title="Pick which 5 stats appear in the table"
-          >
-            Customize Stats
-          </button>
         </div>
       </section>
     </FadeIn>

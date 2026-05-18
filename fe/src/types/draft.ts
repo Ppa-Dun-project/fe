@@ -50,19 +50,28 @@ export type DraftPlayerPublic = {
 };
 
 /**
- * DraftPlayerValue: 인증 필요 /api/draft/players/values 가 돌려주는 가치 정보
+ * DraftPlayerValue: 인증 필요 GET /api/draft/players/value 가 돌려주는 가치 정보
  * - playerId 를 키로 DraftPlayerPublic 과 머지해서 DraftPlayer 를 구성
+ * - recommendedBid 는 모달에서 단건으로 따로 호출 (DraftPlayerBid)
  */
 export type DraftPlayerValue = {
   playerId: string;
   ppaValue: number | null;       // PPA-DUN 가치 점수
-  recommendedBid: number | null; // 추천 드래프트 비용
+};
+
+/**
+ * DraftPlayerBid: POST /api/draft/players/bid 단건 응답
+ * - Add 버튼 클릭 시 모달이 열리는 동안 즉석에서 호출
+ */
+export type DraftPlayerBid = {
+  playerId: string;
+  recommendedBid: number | null;
 };
 
 /**
  * DraftPlayer: UI 에서 사용하는 머지된 선수 타입
- * - 비로그인 또는 값 조회 실패 시 ppaValue / recommendedBid 가 undefined 가 될 수 있음
- * - 표시 시점에 formatPpa() / ?? 등으로 방어 필요
+ * - ppaValue 는 일괄 fetch 로 채워짐. recommendedBid 는 머지 흐름에서 채우지 않음 (모달 props 로 전달).
+ *   타입은 호환성을 위해 optional 로 남겨두지만, mergePlayersWithValues 는 더 이상 세팅하지 않는다.
  */
 export type DraftPlayer = DraftPlayerPublic & {
   ppaValue?: number | null;
@@ -196,8 +205,6 @@ export type PlayerNote = {
 export type DraftSort =
   | "score_desc"
   | "score_asc"
-  | "cost_desc"
-  | "cost_asc"
   | "avg_desc"
   | "hr_desc"
   | "rbi_desc"

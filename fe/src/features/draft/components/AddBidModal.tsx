@@ -5,6 +5,9 @@ type Props = {
   open: boolean;
   player: DraftPlayer | null;
   remainingBudget: number;
+  // 부모가 모달이 열릴 때 단건 호출로 채워 넣는 추천 bid (in-flight 동안 null + bidLoading=true).
+  recommendedBid: number | null;
+  bidLoading: boolean;
   onClose: () => void;
   onConfirm: (bid: number, contractCode: ContractCode) => void;
 };
@@ -24,6 +27,8 @@ export default function AddBidModal({
   open,
   player,
   remainingBudget,
+  recommendedBid,
+  bidLoading,
   onClose,
   onConfirm,
 }: Props) {
@@ -124,7 +129,13 @@ export default function AddBidModal({
                   value={bid}
                   onChange={(e) => setBid(e.target.value)}
                   inputMode="numeric"
-                  placeholder="Enter winning bid"
+                  placeholder={
+                    bidLoading
+                      ? "Loading recommendation..."
+                      : recommendedBid !== null
+                        ? `Recommended: $${recommendedBid}`
+                        : "Enter winning bid"
+                  }
                   className={[
                     "w-full rounded-2xl bg-black/30 px-4 py-3 text-sm text-white outline-none placeholder:text-white/35",
                     bidInputErrorOpen
@@ -187,7 +198,7 @@ export default function AddBidModal({
             <div className="border-t border-white/10 pt-4">
               <div className="text-xs font-extrabold text-white/70">Draft cost</div>
               <div className="mt-2 text-3xl font-black text-emerald-400">
-                ${player.recommendedBid ?? "—"}
+                {bidLoading ? "..." : recommendedBid !== null ? `$${recommendedBid}` : "—"}
               </div>
               <div className="mt-1 text-xs text-white/35">
                 This is the recommended draft cost baseline.

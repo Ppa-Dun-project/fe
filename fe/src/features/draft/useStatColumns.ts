@@ -29,7 +29,7 @@ function readCols(group: StatGroup): string[] {
     if (!raw) return [...defaults];
     const parsed = JSON.parse(raw) as unknown;
     if (!Array.isArray(parsed)) return [...defaults];
-    if (parsed.length !== STAT_COLUMN_COUNT) return [...defaults];
+    if (parsed.length > STAT_COLUMN_COUNT) return [...defaults];
     // Every entry must be a known key in the matching group; otherwise
     // the data is stale (e.g. backend renamed a column) and we reset.
     for (const k of parsed) {
@@ -64,14 +64,16 @@ export function useStatColumns(): UseStatColumns {
   const [batterCols, setBatterColsState] = useState<string[]>(() => readCols("batter"));
   const [pitcherCols, setPitcherColsState] = useState<string[]>(() => readCols("pitcher"));
 
+  // Inline picker 가 한 칸씩 추가/제거 하는 동안의 중간 상태 (0..5) 도 허용한다.
+  // 5 초과만 거부. localStorage 도 같은 정책으로 저장.
   const setBatterCols = useCallback((cols: string[]) => {
-    if (cols.length !== STAT_COLUMN_COUNT) return;
+    if (cols.length > STAT_COLUMN_COUNT) return;
     writeCols("batter", cols);
     setBatterColsState(cols);
   }, []);
 
   const setPitcherCols = useCallback((cols: string[]) => {
-    if (cols.length !== STAT_COLUMN_COUNT) return;
+    if (cols.length > STAT_COLUMN_COUNT) return;
     writeCols("pitcher", cols);
     setPitcherColsState(cols);
   }, []);

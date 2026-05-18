@@ -25,6 +25,7 @@ import type {
   DraftPick,
   DraftPickKind,
   DraftPlayer,
+  DraftPlayerBid,
   DraftPlayerPublic,
   DraftPlayerValue,
   DraftPositionFilter,
@@ -52,6 +53,7 @@ import {
   DEFAULT_POSITION_FILTERS,
   PITCHER_SORT_OPTIONS,
   UNSAVED_DRAFT_KEY,
+  arePlayersComparable,
   buildTeamsFromConfig,
   initialNameFor,
   isPitcherPositionFilter,
@@ -74,13 +76,15 @@ import AddBidModal from "../features/draft/components/AddBidModal";
 import TakenBidModal from "../features/draft/components/TakenBidModal";
 import PlayerComparisonModal from "../features/draft/components/PlayerComparisonModal";
 import PlayerNotePopover from "../features/draft/components/PlayerNotePopover";
-import CustomizeStatsModal from "../features/draft/components/CustomizeStatsModal";
+import StatPickerStrip from "../features/draft/components/StatPickerStrip";
 import SaveSessionModal from "../features/draft/components/SaveSessionModal";
 import NewDraftConfirmModal from "../features/draft/components/NewDraftConfirmModal";
 import ImportSessionsModal from "../features/draft/components/ImportSessionsModal";
+import CopySessionModal from "../features/draft/components/CopySessionModal";
 import PlayerListTable from "../features/draft/components/PlayerListTable";
 import DraftHeaderBar from "../features/draft/components/DraftHeaderBar";
 import PlayerSearchToolbar from "../features/draft/components/PlayerSearchToolbar";
+import OrderedDraftHistoryModal from "../features/draft/components/OrderedDraftHistoryModal";
 import ComparisonPanel from "../features/draft/components/ComparisonPanel";
 import { useStatColumns } from "../features/draft/useStatColumns";
 import { getStatDef } from "../features/draft/statColumns";
@@ -117,6 +121,10 @@ export default function DraftPage() {
 
   // "Start Your Draft" 버튼이 띄우는 setup / 로그인 유도 모달.
   const [setupModalOpen, setSetupModalOpen] = useState(false);
+  const [historyModalOpen, setHistoryModalOpen] = useState(false);
+  // Start Draft 직후 PPA 값 첫 응답을 기다리는 동안 페이지 전체를 블러로 덮어둔다.
+  // 이후 픽 변경에 따른 재계산은 overlay 없이 백그라운드에서 갱신.
+  const [pendingStartDraft, setPendingStartDraft] = useState(false);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
 
   // "New" → "Save first?" Yes 경로에서 Save 가 끝난 직후 setup 모달을
@@ -187,7 +195,6 @@ export default function DraftPage() {
 
   // 사용자가 선택한 5개 스탯 (타자/투수 별도) — localStorage에 영구 저장.
   const { batterCols, pitcherCols, setBatterCols, setPitcherCols } = useStatColumns();
-  const [customizeStatsOpen, setCustomizeStatsOpen] = useState(false);
   const activeStatKeys = showingPitcherColumns ? pitcherCols : batterCols;
   const statColumnLabels = activeStatKeys.map((k) => getStatDef(k)?.label ?? k);
 
@@ -206,6 +213,9 @@ export default function DraftPage() {
   const [boardView, setBoardView] = useState<DraftPickKind>("main");
 
   const [addTarget, setAddTarget] = useState<DraftPlayer | null>(null);
+  // Add 모달이 열릴 때 즉석에서 단건 호출하는 추천 bid + 그 in-flight 상태.
+  const [addTargetBid, setAddTargetBid] = useState<number | null>(null);
+  const [addTargetBidLoading, setAddTargetBidLoading] = useState(false);
   const [takenTarget, setTakenTarget] = useState<DraftPlayer | null>(null);
 
   // 메모 — playerId → note. 로드 모드에서만 fetch/저장 동작 (세션 ID 필요).
@@ -284,8 +294,6 @@ export default function DraftPage() {
 
     const sorted = [...result].sort((a, b) => {
       switch (sort) {
-        case "cost_desc":
-          return (b.recommendedBid ?? 0) - (a.recommendedBid ?? 0);
         case "avg_desc":
           return primaryRateSortValue(b) - primaryRateSortValue(a);
         case "hr_desc":
@@ -350,8 +358,9 @@ export default function DraftPage() {
     return calculateCurrentRound(teams.length, rosterSize, picks);
   }, [teams.length, rosterSize, picks]);
 
-  const selectedA = players.find((player) => player.id === compareAId) ?? null;
-  const selectedB = players.find((player) => player.id === compareBId) ?? null;
+  // 포지션 필터를 바꾸면 paginated `players` 에서 사라질 수 있으므로 전체 lookup 사용.
+  const selectedA = compareAId ? playersById[compareAId] ?? null : null;
+  const selectedB = compareBId ? playersById[compareBId] ?? null : null;
 
   const openAddModal = (player: DraftPlayer) => {
     setAddTarget(player);
@@ -363,6 +372,8 @@ export default function DraftPage() {
 
   const closeAddModal = () => {
     setAddTarget(null);
+    setAddTargetBid(null);
+    setAddTargetBidLoading(false);
   };
 
   const closeTakenModal = () => {
@@ -443,6 +454,8 @@ export default function DraftPage() {
     setNotes({});
     setHasDraftConfig(true);
     setSetupModalOpen(false);
+    // 다음 useEffect 가 새 config 로 PPA 값을 다시 fetch 한다 — overlay 가 그 동안 노출됨.
+    setPendingStartDraft(true);
   };
 
   // 비로그인이면 로그인 모달, 로그인 상태면 setup 모달.
@@ -612,12 +625,9 @@ export default function DraftPage() {
     return () => controller.abort();
   }, [leagueQuery]);
 
-  // 인증된 사용자에게만 PPA 값 + 추천 bid 를 불러와 playerId 로 공개 목록과 머지한다.
+  // 인증된 사용자에게만 PPA 값을 불러와 playerId 로 공개 목록과 머지한다.
+  // recommendedBid 는 Add 모달이 열릴 때 단건으로 따로 호출 (POST /api/draft/players/bid).
   // 로그아웃 시 값을 즉시 지워서 UI 에 남지 않도록 함.
-  // picks/config 가 바뀔 때마다 재호출 — 잔여 예산 변동에 따라 백엔드의 추천 bid 가 갱신되기 때문.
-  // hasDraftConfig 는 의도적으로 의존하지 않음 — 로그인만 하면 (Start Draft 누르기 전에도)
-  // PPA 값이 보여야 한다. 드래프트 시작 전엔 config 가 DEFAULT_DRAFT_CONFIG 로 채워져 있어서
-  // 백엔드가 기본 예산/로스터/상대수로 추천 bid 를 계산해 돌려준다.
   useEffect(() => {
     if (!authed || !config) {
       queueMicrotask(() => setPlayerValues(null));
@@ -626,26 +636,29 @@ export default function DraftPage() {
 
     const controller = new AbortController();
 
-    apiPostAuth<DraftPlayerValuesResponse, { config: DraftConfigServer; picks: DraftPick[] }>(
-      "/api/draft/players/values",
-      { config, picks },
+    apiGetAuth<DraftPlayerValuesResponse>(
+      "/api/draft/players/value",
       undefined,
-      controller.signal
+      controller.signal,
     )
       .then((data) => {
         if (controller.signal.aborted) return;
         setPlayerValues(data.items ?? []);
+        setPendingStartDraft(false);
       })
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") return;
         console.error(err);
         setPlayerValues(null);
+        setPendingStartDraft(false);
+        pushToast("Failed to load player values. Please try again.", "error");
       });
 
     return () => controller.abort();
-  }, [authed, config, picks]);
+  }, [authed, config]);
 
   // Toggle player selection for A/B comparison (max 2 players).
+  // 타자/투수 혼합 비교는 차단하고 토스트로 안내한다.
   const handleCompareToggle = (playerId: string) => {
     if (!authed) return;
     if (comparisonOpen) setComparisonOpen(false);
@@ -658,6 +671,19 @@ export default function DraftPage() {
 
     if (compareBId === playerId) {
       setCompareBId(null);
+      return;
+    }
+
+    const candidate = playersById[playerId];
+    if (!candidate) return;
+    const counterpart = !compareAId
+      ? selectedB
+      : !compareBId
+        ? selectedA
+        : selectedA; // 둘 다 차 있으면 B 를 교체 → A 와 비교 가능해야 함
+
+    if (counterpart && !arePlayersComparable(candidate, counterpart)) {
+      pushToast("Batters and pitchers cannot be compared together.", "error");
       return;
     }
 
@@ -709,33 +735,51 @@ export default function DraftPage() {
     commitPicks((prev) => prev.filter((p) => p.playerId !== pick.playerId));
   };
 
-  // 내 팀 보드 안에서 드래그로 슬롯을 옮길 때:
-  //   - 메인: 자격(isEligibleForSlot) 검사 후 이동/스왑.
-  //   - 마이너/택시: 포지션 자격이 없으니 순수 재정렬(스왑/빈자리 이동).
-  // kind 는 어느 보드의 슬롯을 만지는지 — 같은 kind 내에서만 인덱스 충돌이 발생.
-  // teamId 는 재배치가 일어난 팀 — 내 팀뿐 아니라 opponent 팀의 픽도 사용자가 직접 정리 가능.
+  // 드래그-드롭으로 슬롯/팀을 옮길 때:
+  //  - 같은 팀: 메인은 자격 검사 후 이동/스왑, 마이너·택시는 순수 재정렬.
+  //  - 다른 팀: 빈 슬롯 + 자격(메인) 일 때만 이동. occupied 면 스왑 대신 토스트로 안내.
   const handleSlotReassign = (
+    fromTeamId: string,
     fromIndex: number,
+    toTeamId: string,
     toIndex: number,
     kind: DraftPickKind,
-    teamId: string,
   ) => {
-    if (fromIndex === toIndex) return;
+    if (fromTeamId === toTeamId && fromIndex === toIndex) return;
 
-    const teamPicks = picks.filter(
-      (p) => p.draftedByTeamId === teamId && p.kind === kind
+    const fromTeamPicks = picks.filter(
+      (p) => p.draftedByTeamId === fromTeamId && p.kind === kind
     );
-    const fromPick = teamPicks.find((p) => p.slotIndex === fromIndex);
+    const fromPick = fromTeamPicks.find((p) => p.slotIndex === fromIndex);
     if (!fromPick) return;
-    const toPick = teamPicks.find((p) => p.slotIndex === toIndex);
 
-    // 마이너/택시: 자격 검사 없이 그냥 스왑/이동.
+    const toTeamPicks = picks.filter(
+      (p) => p.draftedByTeamId === toTeamId && p.kind === kind
+    );
+    const toPick = toTeamPicks.find((p) => p.slotIndex === toIndex);
+    const isCrossTeam = fromTeamId !== toTeamId;
+
+    // 팀 간 이동: occupied 면 스왑 안 함, 토스트로 안내.
+    if (isCrossTeam && toPick) {
+      const targetTeam = teams.find((t) => t.id === toTeamId);
+      pushToast(
+        `${targetTeam?.name ?? "Target team"} already has a player in that slot.`,
+        "error",
+      );
+      return;
+    }
+
+    // 마이너/택시: 자격 검사 없이 처리.
     if (kind !== "main") {
       commitPicks((prev) =>
         prev.map((p) => {
           if (p.kind !== kind) return p;
-          if (p.playerId === fromPick.playerId) return { ...p, slotIndex: toIndex };
-          if (toPick && p.playerId === toPick.playerId) return { ...p, slotIndex: fromIndex };
+          if (p.playerId === fromPick.playerId) {
+            return { ...p, slotIndex: toIndex, draftedByTeamId: toTeamId };
+          }
+          if (toPick && p.playerId === toPick.playerId) {
+            return { ...p, slotIndex: fromIndex };
+          }
           return p;
         })
       );
@@ -754,7 +798,24 @@ export default function DraftPage() {
       return;
     }
 
-    // Empty target → simple move.
+    // 팀 간 이동 (빈 슬롯 확인은 위에서 끝남): teamId + slotIndex + slotPos 교체.
+    if (isCrossTeam) {
+      commitPicks((prev) =>
+        prev.map((p) =>
+          p.playerId === fromPick.playerId
+            ? {
+                ...p,
+                slotIndex: toIndex,
+                slotPos: toSlotPos as DraftPosition,
+                draftedByTeamId: toTeamId,
+              }
+            : p
+        )
+      );
+      return;
+    }
+
+    // 같은 팀 — 빈 target → 단순 이동.
     if (!toPick) {
       commitPicks((prev) =>
         prev.map((p) =>
@@ -766,7 +827,7 @@ export default function DraftPage() {
       return;
     }
 
-    // Occupied target → swap only when both directions are eligible.
+    // 같은 팀 — occupied target → 양방향 자격 모두 OK 일 때만 스왑.
     const toPlayer = playersById[toPick.playerId];
     if (!toPlayer) return;
     if (!isEligibleForSlot(toPlayer.positions, fromSlotPos)) {
@@ -866,7 +927,7 @@ export default function DraftPage() {
     return true;
   };
 
-  // Add 버튼 클릭 — 메인이면 bid 모달, 마이너/택시는 바로 추가.
+  // Add 버튼 클릭 — 메인이면 bid 모달 (열면서 단건 bid fetch), 마이너/택시는 바로 추가.
   const handleAddClick = (player: DraftPlayer) => {
     if (boardView !== "main") {
       if (!myTeam) return;
@@ -875,7 +936,20 @@ export default function DraftPage() {
       }
       return;
     }
+    if (!config) return;
     openAddModal(player);
+    setAddTargetBid(null);
+    setAddTargetBidLoading(true);
+    apiPostAuth<DraftPlayerBid, { playerId: string; config: DraftConfigServer; picks: DraftPick[] }>(
+      "/api/draft/players/bid",
+      { playerId: player.id, config, picks },
+    )
+      .then((res) => setAddTargetBid(res.recommendedBid))
+      .catch((err: unknown) => {
+        console.error(err);
+        setAddTargetBid(null);
+      })
+      .finally(() => setAddTargetBidLoading(false));
   };
 
   const handleAddFinish = (bid: number, contractCode: ContractCode) => {
@@ -994,6 +1068,11 @@ export default function DraftPage() {
   // ── Import 모달 핸들러 ──
   const [sessionList, setSessionList] = useState<SessionSummary[]>([]);
   const [sessionListLoading, setSessionListLoading] = useState(false);
+  // Copy 흐름: Copy 버튼 클릭 시 rename 모달을 띄우고, Confirm 시 실제 POST.
+  const [copyTarget, setCopyTarget] = useState<{ id: number } | null>(null);
+  const [copyNameInput, setCopyNameInput] = useState("");
+  const [copyError, setCopyError] = useState<string | null>(null);
+  const [copySaving, setCopySaving] = useState(false);
 
   const refreshSessionList = () => {
     setSessionListLoading(true);
@@ -1018,6 +1097,79 @@ export default function DraftPage() {
   const handleSessionPick = (id: number) => {
     closeImportModal();
     navigate(`/draft/${id}`);
+  };
+
+  // Copy 버튼 클릭: rename 모달을 띄운다. 실제 POST 는 handleCopyConfirm.
+  const handleSessionCopy = (id: number) => {
+    const source = sessionList.find((s) => s.id === id);
+    setCopyTarget({ id });
+    setCopyNameInput(source ? `${source.name} (Copy)` : "Copied Draft");
+    setCopyError(null);
+  };
+
+  const closeCopyModal = () => {
+    if (copySaving) return;
+    setCopyTarget(null);
+    setCopyNameInput("");
+    setCopyError(null);
+  };
+
+  // Confirm: 원본 세션 + 메모 로드 → 사용자가 입력한 이름으로 새 세션 POST.
+  const handleCopyConfirm = () => {
+    if (copyTarget === null) return;
+    const name = copyNameInput.trim();
+    if (!name) {
+      setCopyError("Name is required");
+      return;
+    }
+    const sourceId = copyTarget.id;
+    setCopySaving(true);
+    setCopyError(null);
+
+    apiGetAuth<SessionDetail>(`/api/draft/sessions/${sourceId}`)
+      .then(async (original) => {
+        const notesResp = await apiGetAuth<{ items: { playerId: string; note: string }[] }>(
+          `/api/draft/sessions/${sourceId}/notes`,
+        ).catch(() => ({ items: [] }));
+
+        const created = await apiPostAuth<
+          SessionDetail,
+          { name: string; config: DraftConfigServer; picks: DraftPick[] }
+        >("/api/draft/sessions", {
+          name,
+          config: original.config,
+          picks: original.picks,
+        });
+
+        if (notesResp.items.length > 0) {
+          await Promise.all(
+            notesResp.items.map((n) =>
+              apiPutAuth<{ status: string }, { note: string }>(
+                `/api/draft/sessions/${created.id}/notes/${encodeURIComponent(n.playerId)}`,
+                { note: n.note },
+              ).catch((err: unknown) => {
+                console.error(`Failed to copy note for ${n.playerId}:`, err);
+              }),
+            ),
+          );
+        }
+
+        setCopySaving(false);
+        setCopyTarget(null);
+        setCopyNameInput("");
+        pushToast(`Copied as "${created.name}".`, "success");
+        refreshSessionList();
+      })
+      .catch((err: unknown) => {
+        console.error(err);
+        setCopySaving(false);
+        const msg = err instanceof Error ? err.message : "";
+        if (msg.includes("Maximum")) {
+          setCopyError("Reached max session count. Delete one and try again.");
+        } else {
+          setCopyError(msg || "Copy failed");
+        }
+      });
   };
 
   const handleSessionDelete = (id: number) => {
@@ -1082,6 +1234,7 @@ export default function DraftPage() {
               onViewChange={setBoardView}
               onRemovePick={handleRemovePick}
               onSlotReassign={handleSlotReassign}
+              onOpenHistory={() => setHistoryModalOpen(true)}
             />
           ) : (
             <section className="rounded-3xl border border-white/10 bg-white/5 p-8 text-center">
@@ -1118,7 +1271,6 @@ export default function DraftPage() {
         }}
         hasDraftConfig={hasDraftConfig}
         remainingBudget={remainingBudget}
-        onOpenCustomizeStats={() => setCustomizeStatsOpen(true)}
       />
 
       <ComparisonPanel
@@ -1129,6 +1281,12 @@ export default function DraftPage() {
         onClearB={clearCompareB}
         onClearAll={clearCompare}
         onOpenComparison={() => setComparisonOpen(true)}
+      />
+
+      <StatPickerStrip
+        group={showingPitcherColumns ? "pitcher" : "batter"}
+        cols={showingPitcherColumns ? pitcherCols : batterCols}
+        onChange={showingPitcherColumns ? setPitcherCols : setBatterCols}
       />
 
       <PlayerListTable
@@ -1163,6 +1321,8 @@ export default function DraftPage() {
           open={true}
           player={addTarget}
           remainingBudget={remainingBudget}
+          recommendedBid={addTargetBid}
+          bidLoading={addTargetBidLoading}
           onClose={closeAddModal}
           onConfirm={handleAddFinish}
         />
@@ -1194,18 +1354,6 @@ export default function DraftPage() {
         playerType={profilePlayerType}
         onClose={closePlayerInfo}
       />
-
-      {customizeStatsOpen && (
-        <CustomizeStatsModal
-          onClose={() => setCustomizeStatsOpen(false)}
-          batterCols={batterCols}
-          pitcherCols={pitcherCols}
-          onSave={(group, cols) => {
-            if (group === "batter") setBatterCols(cols);
-            else setPitcherCols(cols);
-          }}
-        />
-      )}
 
       {noteTarget && (
         <PlayerNotePopover
@@ -1240,6 +1388,18 @@ export default function DraftPage() {
           onClose={closeImportModal}
           onPick={handleSessionPick}
           onDelete={handleSessionDelete}
+          onCopy={handleSessionCopy}
+        />
+      )}
+
+      {copyTarget !== null && (
+        <CopySessionModal
+          nameInput={copyNameInput}
+          onChangeName={setCopyNameInput}
+          error={copyError}
+          copying={copySaving}
+          onCancel={closeCopyModal}
+          onConfirm={handleCopyConfirm}
         />
       )}
 
@@ -1265,7 +1425,46 @@ export default function DraftPage() {
         onAuthSuccess={() => setSetupModalOpen(true)}
       />
 
+      <OrderedDraftHistoryModal
+        open={historyModalOpen}
+        picks={picks}
+        teams={teams}
+        playersById={playersById}
+        onClose={() => setHistoryModalOpen(false)}
+      />
+
       <Toast toasts={toasts} onDismiss={dismissToast} />
+
+      {pendingStartDraft && (
+        <div className="fixed inset-0 z-100 grid place-items-center bg-black/50 backdrop-blur-md">
+          <div className="flex items-center gap-3 rounded-2xl border border-white/15 bg-[#0c1220] px-6 py-5 shadow-2xl">
+            <svg
+              className="h-5 w-5 animate-spin text-white/80"
+              viewBox="0 0 24 24"
+              fill="none"
+              aria-hidden="true"
+            >
+              <circle
+                cx="12"
+                cy="12"
+                r="10"
+                stroke="currentColor"
+                strokeWidth="3"
+                className="opacity-25"
+              />
+              <path
+                d="M4 12a8 8 0 0 1 8-8"
+                stroke="currentColor"
+                strokeWidth="3"
+                strokeLinecap="round"
+              />
+            </svg>
+            <div className="text-sm font-black text-white">
+              Loading player values...
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
