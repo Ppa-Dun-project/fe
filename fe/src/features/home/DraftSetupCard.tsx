@@ -222,7 +222,7 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
               className={pill(leagueType === "custom")}
               onClick={() => setLeagueType("custom")}
             >
-              <div className="text-sm font-black text-white">Custom</div>
+              <div className="text-sm font-black text-white">AL+NL</div>
               <div className="mt-1 text-xs text-white/60">Both leagues</div>
             </button>
           </div>
