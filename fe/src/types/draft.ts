@@ -101,6 +101,16 @@ export type DraftPickType = "mine" | "taken";
 export type DraftPickKind = "main" | "minor" | "taxi";
 
 /**
+ * ContractCode: keeper / contract 상태. 영입 당시 사용자가 고른 원본 값.
+ * 화면에 표시할 때는 (targetSeason − signedSeason) 만큼 깎아서 동적 계산.
+ *   F3/F2/F1 = Free Agent (3/2/1년 남음)
+ *   S1       = 단년 계약
+ *   L2/LX    = 장기 계약 (2년 남음 / 만료 상태)
+ *   X        = 만료 / 비보호
+ */
+export type ContractCode = "F3" | "F2" | "F1" | "S1" | "L2" | "LX" | "X";
+
+/**
  * DraftPick: 개별 드래프트 픽 정보
  */
 export type DraftPick = {
@@ -111,6 +121,8 @@ export type DraftPick = {
   bid: number | null;            // 낙찰가 ($) — 마이너/택시는 null
   type: DraftPickType;           // "mine" 또는 "taken"
   kind: DraftPickKind;           // "main" | "minor" | "taxi"
+  contractCode?: ContractCode | null;  // 영입 당시 keeper 계약 코드 (옛 픽은 null)
+  signedSeason?: number | null;        // 영입 세션의 targetSeason (옛 픽은 null)
 };
 
 /**
@@ -125,6 +137,7 @@ export type DraftConfigLocal = {
   budget?: number;               // 예산 ($)
   rosterPlayers?: number;        // 로스터 인원
   rosterSlots?: RosterSlotCounts; // 포지션별 슬롯 수
+  targetSeason?: number;         // keeper 롤오버의 기준 시즌 (예: 2027)
   createdAt?: string;            // 설정 생성 시간
 };
 
@@ -141,6 +154,7 @@ export type DraftConfigServer = {
   opponentsCount: number;
   oppTeamNames: string[];
   rosterSlots?: RosterSlotCounts;
+  targetSeason?: number | null;  // 옛 세션은 null/undefined일 수 있음
 };
 
 /**
