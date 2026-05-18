@@ -19,20 +19,38 @@ export default function NewsCard({ item }: Props) {
       rel="noreferrer"
       className="group relative block w-full overflow-hidden rounded-2xl border border-white/10 bg-white/5 text-left transition hover:bg-white/8 hover:-translate-y-[2px] active:translate-y-0"
     >
-      {/* 좌측 썸네일 + 우측 텍스트 가로 레이아웃. 이미지가 없으면 텍스트만 폭 100% */}
+      {/* 좌측 썸네일 + 우측 텍스트 가로 레이아웃. */}
+      {/* imageUrl 없거나 깨지면 회색 placeholder를 보여서 카드 폭이 항상 일정. */}
       <div className="flex items-stretch gap-4">
-        {/* 썸네일: imageUrl이 있을 때만 렌더. onError로 깨진 이미지는 카드에서 숨김 */}
-        {item.imageUrl && (
-          <div className="relative hidden w-40 shrink-0 overflow-hidden bg-white/5 sm:block">
+        <div className="relative hidden w-40 shrink-0 overflow-hidden bg-white/10 sm:block">
+          {item.imageUrl ? (
             <img
               src={item.imageUrl}
               alt=""
               loading="lazy"
               className="h-full w-full object-cover transition group-hover:scale-105"
-              onError={(e) => { (e.currentTarget.parentElement as HTMLElement).style.display = "none"; }}
+              onError={(e) => {
+                // 깨진 이미지 → placeholder로 fallback (영역 자체는 유지)
+                e.currentTarget.style.display = "none";
+              }}
             />
-          </div>
-        )}
+          ) : (
+            <div className="flex h-full w-full items-center justify-center">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth={1.5}
+                className="h-10 w-10 text-white/25"
+                aria-hidden="true"
+              >
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <circle cx="9" cy="11" r="1.5" />
+                <path d="M21 17l-5-5-6 6" />
+              </svg>
+            </div>
+          )}
+        </div>
 
         {/* 텍스트 영역 */}
         <div className="relative flex-1 p-5">
