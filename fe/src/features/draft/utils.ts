@@ -1,4 +1,5 @@
 import type {
+  ContractCode,
   DraftConfigLocal,
   DraftPick,
   DraftTeam,
@@ -194,6 +195,42 @@ export function findFirstEmptySlot(occupied: Set<number>, count: number): number
     if (!occupied.has(i)) return i;
   }
   return -1;
+}
+
+/**
+ * Keeper / contract 코드의 시즌 롤오버 테이블.
+ * {code: [elapsed=0 일 때 상태, elapsed=1, ...]} — 끝을 넘긴 elapsed 는 모두 "X" 로 떨어진다.
+ * 백엔드 be/contract_rollover.py 의 _ROLLOVER_TABLE 과 1:1 동기화되어야 한다.
+ */
+const ROLLOVER_TABLE: Record<ContractCode, ContractCode[]> = {
+  F3: ["F3", "F2", "F1"],
+  F2: ["F2", "F1"],
+  F1: ["F1"],
+  S1: ["S1"],
+  L2: ["L2", "LX"],
+  LX: ["LX"],
+  X: [],
+};
+
+/**
+ * 영입 당시 코드와 그동안 흐른 시즌 수로 현재 계약 상태를 계산.
+ *  - code 가 null/undefined: keeper 정보 없는 옛 픽 → null 반환
+ *  - yearsElapsed ≤ 0: 과거 재현 등 비정상 입력 → 원본 코드 그대로
+ *  - 테이블을 넘긴 elapsed: "X" (만료)
+ *
+ * 픽을 실제로 제외할지는 호출자(import preview UI)가 결정한다.
+ */
+export function rolledContract(
+  code: ContractCode | null | undefined,
+  yearsElapsed: number,
+): ContractCode | null {
+  if (code == null) return null;
+  if (yearsElapsed <= 0) return code;
+
+  const timeline = ROLLOVER_TABLE[code];
+  if (!timeline) return code;
+  if (yearsElapsed < timeline.length) return timeline[yearsElapsed];
+  return "X";
 }
 
 /** Check if player is available, drafted by me, or taken by opponent.

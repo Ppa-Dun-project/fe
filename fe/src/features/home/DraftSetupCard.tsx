@@ -21,6 +21,8 @@ export type DraftSetupConfig = {
   budget: number;
   rosterPlayers: number;
   rosterSlots: RosterSlotCounts;
+  // keeper 롤오버의 기준 시즌. 픽의 contractCode/signedSeason 과 함께 계산에 사용.
+  targetSeason: number;
 };
 type Props = {
   onSubmit?: (config: DraftSetupConfig) => void;
@@ -58,6 +60,8 @@ const OPPONENTS_MAX = 12;
 const BUDGET_MIN = 1;
 const SLOT_MIN = 0;
 const SLOT_MAX = 10;
+const SEASON_MIN = 2020;
+const SEASON_MAX = 2100;
 
 const POSITION_ORDER: RosterSlotPosition[] = [
   "C", "1B", "2B", "3B", "SS", "OF", "UTIL", "SP", "RP", "BENCH",
@@ -91,11 +95,16 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
   const [leagueType, setLeagueType] = useState<LeagueType>("AL");
   const [budgetStr, setBudgetStr] = useState<string>("260");
   const [rosterSlots, setRosterSlots] = useState<RosterSlotCounts>(DEFAULT_ROSTER_SLOTS);
+  // 디폴트는 현재 연도 + 1. 5월 이후 새 keeper draft 를 짤 때 다음 시즌을 가리키는 게 가장 흔한 시나리오.
+  const [targetSeasonStr, setTargetSeasonStr] = useState<string>(
+    String(new Date().getFullYear() + 1)
+  );
 
   // Derived numbers
   const opponentsCount = clamp(parseIntOr0(opponentsCountStr), 0, OPPONENTS_MAX);
   const budget = Math.max(BUDGET_MIN, parseIntOr0(budgetStr));
   const rosterPlayers = useMemo(() => sumRosterSlots(rosterSlots), [rosterSlots]);
+  const targetSeason = clamp(parseIntOr0(targetSeasonStr), SEASON_MIN, SEASON_MAX);
 
   const syncOppTeamNames = (count: number) => {
     setOppTeamNames((prev) => {
@@ -140,6 +149,7 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
       budget,
       rosterPlayers,
       rosterSlots,
+      targetSeason,
     };
 
     if (onSubmit) {
@@ -207,6 +217,23 @@ export default function DraftSetupCard({ onSubmit, embedded = false }: Props = {
               <div className="mt-1 text-xs text-white/60">Both leagues</div>
             </button>
           </div>
+        </div>
+
+        <div>
+          <label className="text-xs font-extrabold text-white/70">
+            Target season{" "}
+            <span className="text-white/40">(keeper rollover 기준)</span>
+          </label>
+          <input
+            type="number"
+            inputMode="numeric"
+            min={SEASON_MIN}
+            max={SEASON_MAX}
+            value={targetSeasonStr}
+            onFocus={selectAllOnFocus}
+            onChange={(e) => setTargetSeasonStr(e.target.value)}
+            className={`${INPUT_CLASS} no-spinner`}
+          />
         </div>
 
         <div>
